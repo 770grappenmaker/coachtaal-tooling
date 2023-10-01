@@ -85,6 +85,10 @@ fun lexer(input: String): List<Token> {
                     val grouped = result.removeLastN(result.size - start.size)
                     result += Token(GroupToken(grouped), input.slice(start.ptr..ptr), start.line, start.col)
                 }
+                ';' -> {
+                    require(groupStack.isNotEmpty()) { "; outside of parentheses" }
+                    token(ParameterSeparatorToken)
+                }
                 ':' -> {
                     require(match('=')) { ": without = (assignment operator)" }
                     token(AssignmentToken)
@@ -117,6 +121,7 @@ data object InvalidToken : TokenInfo
 data object NotToken : TokenInfo
 data object AndToken : TokenInfo
 data object OrToken : TokenInfo
+data object ParameterSeparatorToken : TokenInfo
 
 // We don't know what the equals token means until parsing
 data object EqualsToken : TokenInfo
