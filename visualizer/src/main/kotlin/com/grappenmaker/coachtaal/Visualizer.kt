@@ -52,7 +52,10 @@ fun main() {
            y = y + vy * dt
            
            t = t + dt
-           als y <= 0 dan stop eindals
+           als y <= 0 dan
+               stop
+               y = 0
+           eindals
         """.trimIndent()
     )
 

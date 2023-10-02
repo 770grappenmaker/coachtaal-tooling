@@ -7,8 +7,9 @@ fun parseProgram(tokens: List<Token>) = Parser(tokens).parseFull()
 
 fun parseExpression(tokens: List<Token>) = parseSingle(tokens) { compare() }
 fun parseStatement(tokens: List<Token>) = parseSingle(tokens) { statement() }
+fun parseBlock(tokens: List<Token>) = parseSingle(tokens) { parseFull() }
 
-private inline fun parseSingle(tokens: List<Token>, method: Parser.() -> Expr): Expr {
+private inline fun <T> parseSingle(tokens: List<Token>, method: Parser.() -> T): T {
     val parser = Parser(tokens)
     return parser.method().also {
         require(parser.isAtEnd) {
@@ -50,7 +51,10 @@ class Parser(val tokens: List<Token>) {
     // Returns the current token and goes to the next
     private fun take(skipNewLine: Boolean = true): Token {
         eofError()
-        while (skipNewLine && tokens[ptr].info is NewLineToken && ptr + 1 in tokens.indices) advance()
+        while (skipNewLine && tokens[ptr].info is NewLineToken) {
+            advance()
+            eofError()
+        }
 
         val returned = tokens[ptr]
         advance()
@@ -71,10 +75,15 @@ class Parser(val tokens: List<Token>) {
     fun takeWhile(skipNewLine: Boolean = true, cond: (TokenInfo) -> Boolean): List<Token> {
         val start = ptr
         while (ptr + 1 in tokens.indices &&
-            (skipNewLine && tokens[ptr].info is NewLineToken || cond(tokens[ptr + 1].info))
-        ) ptr++
+            (skipNewLine && tokens[ptr + 1].info is NewLineToken || cond(tokens[ptr + 1].info))
+        ) advance()
 
         return tokens.slice(start..ptr)
+    }
+
+    // Skips all newlines
+    fun skipNewLine() {
+        while (!isAtEnd && tokens[ptr].info is NewLineToken) advance()
     }
 
     private fun advance() {
@@ -145,11 +154,12 @@ class Parser(val tokens: List<Token>) {
         advance()
 
         val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in setOf("anders", "eindals") }
-
-        advance()
         eofError()
 
-        val curr = peek().info
+        val seenEnd = (peek().info as Identifier).value == "eindals"
+        advance()
+
+        val curr = if (!seenEnd && !isAtEnd) peek().info else null
         val whenFalse = if (curr is Identifier && curr.value.lowercase() == "anders") {
             advance()
             takeWhile { it !is Identifier || it.value.lowercase() != "eindals" }
@@ -157,9 +167,9 @@ class Parser(val tokens: List<Token>) {
 
         eofError()
         advance()
-        advance()
+        if (curr != null) advance()
 
-        return ConditionalExpr(parseExpression(condition), parseStatement(whenTrue), whenFalse?.let(::parseStatement))
+        return ConditionalExpr(parseExpression(condition), parseBlock(whenTrue), whenFalse?.let(::parseBlock))
     }
 
     fun call(id: Identifier): Expr {
@@ -202,6 +212,7 @@ class Parser(val tokens: List<Token>) {
         while (!isAtEnd) {
             add(statement())
             if (!isAtEnd && tokens[ptr].info !is NewLineToken) unexpected(tokens[ptr])
+            skipNewLine()
         }
     }
 }
@@ -260,9 +271,11 @@ data class LiteralExpr(val value: Float) : Expr {
     override fun eval(interpreter: Interpreter) = result
 }
 
-data class ConditionalExpr(val condition: Expr, val whenTrue: Expr, val whenFalse: Expr?) : Expr {
+data class ConditionalExpr(val condition: Expr, val whenTrue: List<Expr>, val whenFalse: List<Expr>?) : Expr {
     override fun eval(interpreter: Interpreter): ExprResult {
         (if (condition.eval(interpreter).number.asCoachBoolean) whenTrue else whenFalse)?.eval(interpreter)
         return ExprResult.None
     }
 }
+
+fun List<Expr>.eval(interpreter: Interpreter) = forEach { it.eval(interpreter) }
