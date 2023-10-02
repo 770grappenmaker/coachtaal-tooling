@@ -2,32 +2,49 @@ package com.grappenmaker.coachtaal
 
 import kotlin.math.pow
 
-// Example
-//fun main() {
-//    val parsed = parseProgram(
-//        """
-//        b wordt 10
-//        a wordt -b^-2 + 10 - 1 * 5
-//        c wordt (-b^-2 + 10 - 1) * 5
-//        d wordt (-b^(-2 + 10) - 1) * 5
-//        e = PI
-//        f = rand
-//        g = rand(1;2;3)
-//    """.trimIndent()
-//    )
-//
-//    println(parsed)
-//    println(Interpreter(parsed).apply { run() }.memory)
-//}
+fun main() {
+    val lexed = lexer(
+        """
+        b wordt 10
+        a wordt -b^-2 + 10 - 1 * 5
+        c wordt (-b^-2 + 10 - 1) * 5
+        d wordt (-b^(-2 + 10) - 1) * 5
+        e = PI
+        f = rand
+        g = rand(1;2;3)
+        
+        als e = PI dan e = Aan eindals
+    """.trimIndent().trim()
+    )
 
-fun parseProgram(contents: String): List<Expr> {
-    val tokens = lexer(contents)
-    if (tokens.isEmpty()) return emptyList()
+//    println("Lexed: $lexed")
+    val parsed = parseProgram(lexed)
 
-    return Parser(tokens).parseFull()
+    println(parsed)
+    println(Interpreter(parsed).apply { run() }.memory)
 }
 
-fun parseExpression(tokens: List<Token>) = Parser(tokens, allowAssignment = false).compare()
+fun parseProgram(contents: String) = parseProgram(lexer(contents))
+fun parseProgram(tokens: List<Token>) = Parser(tokens).parseFull()
+
+fun parseExpression(tokens: List<Token>): Expr {
+    val parser = Parser(tokens)
+    return parser.compare().also {
+        require(parser.isAtEnd) {
+            "parsing expression had dangling tokens: ${parser.tokens.drop(parser.ptr)}"
+        }
+    }
+}
+
+fun parseStatement(tokens: List<Token>): Expr {
+    val parser = Parser(tokens)
+    return parser.statement().also {
+        require(parser.isAtEnd) {
+            "parsing statement had dangling tokens: ${parser.tokens.drop(parser.ptr)}" +
+                    ", consumed ${parser.tokens.take(parser.ptr)}"
+        }
+    }
+}
 
 val binaryOperators = mapOf<String, (Float, Float) -> Float>(
     "=" to { a, b -> (a == b).asCoach },
@@ -48,11 +65,12 @@ fun findOperator(info: BinaryOperatorToken) = binaryOperators.getValue(info.oper
 private fun unexpected(token: Token): Nothing =
     error("Unexpected token ${token.info.javaClass.simpleName} at ${token.line}:${token.column}, \"${token.lexeme}\"")
 
-class Parser(private val tokens: List<Token>, private val allowAssignment: Boolean = true) {
-    private var ptr = 0
+class Parser(val tokens: List<Token>) {
+    var ptr = 0
+    val isAtEnd get() = ptr !in tokens.indices
 
     // Can do ptr - 1 because of the empty check at the start
-    private fun eofError() = require(ptr in tokens.indices) {
+    private fun eofError() = require(!isAtEnd) {
         val token = tokens[ptr - 1]
         "Unexpected EOF at ${token.line}:${token.column}"
     }
@@ -77,13 +95,23 @@ class Parser(private val tokens: List<Token>, private val allowAssignment: Boole
         return tokens[tempPtr]
     }
 
+    // Returns all next tokens satisfying [cond]
+    fun takeWhile(skipNewLine: Boolean = true, cond: (TokenInfo) -> Boolean): List<Token> {
+        val start = ptr
+        while (ptr + 1 in tokens.indices &&
+            (skipNewLine && tokens[ptr].info is NewLineToken || cond(tokens[ptr + 1].info))
+        ) ptr++
+
+        return tokens.slice(start..ptr)
+    }
+
     private fun advance() {
         ptr++
     }
 
     fun primary(): Expr {
         val curr = take()
-        if (ptr in tokens.indices && peek().info is GroupToken)
+        if (!isAtEnd && peek().info is GroupToken)
             return call(curr.info as? Identifier ?: unexpected(curr))
 
         return when (val info = curr.info) {
@@ -97,7 +125,7 @@ class Parser(private val tokens: List<Token>, private val allowAssignment: Boole
     fun binaryOperator(parseLeft: () -> Expr, parseRight: () -> Expr = parseLeft, operators: Set<String>): Expr {
         var first = parseLeft()
 
-        while (ptr in tokens.indices) {
+        while (!isAtEnd) {
             val operator = peek()
             val info = if (operator.info is EqualsToken) BinaryOperatorToken("=")
             else operator.info as? BinaryOperatorToken ?: break
@@ -137,8 +165,34 @@ class Parser(private val tokens: List<Token>, private val allowAssignment: Boole
 
     fun assignment(id: Identifier) = AssignmentExpr(id, compare())
 
+    fun ifStatement(): Expr {
+        val condition = takeWhile { it !is Identifier || it.value.lowercase() != "dan" }
+        eofError()
+
+        advance()
+        advance()
+
+        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in setOf("anders", "eindals") }
+
+        advance()
+        eofError()
+
+        val curr = peek().info
+        val whenFalse = if (curr is Identifier && curr.value.lowercase() == "anders") {
+            advance()
+            takeWhile { it !is Identifier || it.value.lowercase() != "eindals" }
+        } else null
+
+        eofError()
+        advance()
+        advance()
+
+        return ConditionalExpr(parseExpression(condition), parseStatement(whenTrue), whenFalse?.let(::parseStatement))
+    }
+
     fun call(id: Identifier): Expr {
-        if (ptr !in tokens.indices) return CallExpr(id, emptyList())
+        if (id.value.lowercase() == "als") return ifStatement()
+        if (isAtEnd) return CallExpr(id, emptyList())
 
         val curr = peek()
         val info = curr.info
@@ -163,7 +217,7 @@ class Parser(private val tokens: List<Token>, private val allowAssignment: Boole
         val currToken = take()
         val identifier = currToken.info as? Identifier ?: unexpected(currToken)
 
-        return if (allowAssignment && ptr in tokens.indices) {
+        return if (!isAtEnd) {
             val info = peek().info
             if (info is EqualsToken || info is AssignmentToken) {
                 advance()
@@ -172,15 +226,11 @@ class Parser(private val tokens: List<Token>, private val allowAssignment: Boole
         } else call(identifier)
     }
 
-    fun parseFull(): List<Expr> {
-        val result = mutableListOf<Expr>()
-
-        while (ptr in tokens.indices) {
-            result += statement()
-            if (ptr in tokens.indices && tokens[ptr].info !is NewLineToken) unexpected(tokens[ptr])
+    fun parseFull() = if (tokens.isEmpty()) emptyList() else buildList {
+        while (!isAtEnd) {
+            add(statement())
+            if (!isAtEnd && tokens[ptr].info !is NewLineToken) unexpected(tokens[ptr])
         }
-
-        return result
     }
 }
 
@@ -236,4 +286,11 @@ data class IdentifierExpr(val value: Identifier) : Expr {
 data class LiteralExpr(val value: Float) : Expr {
     private val result = ExprResult.Number(value)
     override fun eval(interpreter: Interpreter) = result
+}
+
+data class ConditionalExpr(val condition: Expr, val whenTrue: Expr, val whenFalse: Expr?) : Expr {
+    override fun eval(interpreter: Interpreter): ExprResult {
+        (if (condition.eval(interpreter).number.asCoachBoolean) whenTrue else whenFalse)?.eval(interpreter)
+        return ExprResult.None
+    }
 }
