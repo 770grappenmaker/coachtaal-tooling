@@ -20,14 +20,18 @@ val Float.asCoachBoolean get() = this > 0f
 
 fun <T> MutableList<T>.removeLastN(n: Int) = List(n) { removeLast() }.asReversed()
 inline fun <T> Iterable<T>.split(cond: (T) -> Boolean): List<List<T>> {
+    val iter = iterator()
+    if (!iter.hasNext()) return emptyList()
+
     val result = mutableListOf<List<T>>()
     var soFar = mutableListOf<T>()
 
-    for (v in this) if (cond(v)) {
+    for (v in iter) if (cond(v)) {
         result += soFar
         soFar = mutableListOf()
     } else soFar += v
 
+    if (soFar.isNotEmpty()) result += soFar
     return result
 }
 

@@ -1,44 +1,66 @@
 package com.grappenmaker.coachtaal
 
+import java.io.File
 import kotlin.math.pow
 
+// Example
 fun main() {
-    val lexed = lexer(
+    val initialize = parseProgram(
         """
-        b wordt 10
-        a wordt -b^-2 + 10 - 1 * 5
-        c wordt (-b^-2 + 10 - 1) * 5
-        d wordt (-b^(-2 + 10) - 1) * 5
-        e = PI
-        f = rand
-        g = rand(1;2;3)
-        
-        als e = PI dan e = Aan eindals
-    """.trimIndent().trim()
+            t = 0
+            m = 0,0050
+            g = 9,81
+            Fz = m * g
+            x = 0
+            y = 1,5
+            v = 20
+            alfa = 15 * Pi / 180
+            k = 0,003
+            vx = v * cos(alfa)
+            vy = v * sin(alfa)
+            dt = 0,001
+        """.trimIndent()
     )
 
-//    println("Lexed: $lexed")
-    val parsed = parseProgram(lexed)
+    val iteration = parseProgram(
+        """
+            v = sqrt(vx^2 + vy^2)
+            Fw = k * v^2
+            Fwx = Fw * (vx / v)
+            Fresx = -Fwx
+            Fwy = Fw * (vy / v)
+            Fresy = -Fz - Fwy
 
-    println(parsed)
-    println(Interpreter(parsed).apply { run() }.memory)
+            ax = Fresx / m
+            ay = Fresy / m
+
+            vx = vx + ax * dt
+            vy = vy + ay * dt
+
+            x = x + vx * dt
+            y = y + vy * dt
+
+            t = t + dt
+            als y <= 0 dan stop eindals
+        """.trimIndent()
+    )
+
+    File("test.tsv").writeText(Interpreter(
+        iteration,
+        initialize,
+        logVariables = setOf("y", "x")
+    ).apply { run() }.toTSV())
 }
 
 fun parseProgram(contents: String) = parseProgram(lexer(contents))
 fun parseProgram(tokens: List<Token>) = Parser(tokens).parseFull()
 
-fun parseExpression(tokens: List<Token>): Expr {
-    val parser = Parser(tokens)
-    return parser.compare().also {
-        require(parser.isAtEnd) {
-            "parsing expression had dangling tokens: ${parser.tokens.drop(parser.ptr)}"
-        }
-    }
-}
+fun parseExpression(tokens: List<Token>) = parseSingle(tokens) { compare() }
+fun parseStatement(tokens: List<Token>) = parseSingle(tokens) { statement() }
 
-fun parseStatement(tokens: List<Token>): Expr {
+private inline fun parseSingle(tokens: List<Token>, method: Parser.() -> Expr): Expr {
     val parser = Parser(tokens)
-    return parser.statement().also {
+    return parser.method().also {
         require(parser.isAtEnd) {
             "parsing statement had dangling tokens: ${parser.tokens.drop(parser.ptr)}" +
                     ", consumed ${parser.tokens.take(parser.ptr)}"
@@ -197,7 +219,7 @@ class Parser(val tokens: List<Token>) {
         val curr = peek()
         val info = curr.info
 
-        if (curr.info is GroupToken) advance()
+        if (info is GroupToken) advance()
         val arguments = (info as? GroupToken)?.verify()?.tokens
             ?.split { it.info is ParameterSeparatorToken } ?: emptyList()
 

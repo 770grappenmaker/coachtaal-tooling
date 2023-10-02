@@ -30,28 +30,51 @@ val coachBuiltins: Map<String, Interpreter.(args: List<Float>) -> Float?> = mapO
     "rand" to { Random.nextFloat() },
     "teken" to { (a) -> a.sign },
     "eenheidstap" to { (x, b) -> if (x < b) 0f else 1f },
-    "stop" to { stopped = true ; null }
+    "stop" to { stop() ; null }
 )
 
-class Interpreter(val parsed: List<Expr>) {
-    var ptr = 0
-    var stopped = false
-    val memory = mutableMapOf<String, Float>()
+data class LogbookEntry(val variable: String, val value: Float, val iteration: Int)
 
-    val isRunning get() = ptr in parsed.indices && !stopped
+class Interpreter(
+    private val iteration: List<Expr>,
+    initial: List<Expr> = emptyList(),
+    private val maxIterations: Int = -1,
+    private val logVariables: Set<String> = emptySet()
+) {
+    var iterations = 0
+        private set
+
+    var stopped = false
+        private set
+
+    val memory = mutableMapOf<String, Float>()
+    val logbook = mutableListOf<List<LogbookEntry>>()
 
     fun call(name: String, arguments: List<Float>) =
         (coachBuiltins[name.lowercase()] ?: TODO("Calling $name"))(arguments)
 
-    fun step() {
-        if (!isRunning) return
-
-        parsed[ptr].eval(this)
-        ptr++
+    init {
+        initial.run()
+        updateLogbook()
     }
 
+    fun iterate() {
+        if (stopped) return
+
+        iteration.run()
+        if (++iterations >= maxIterations && maxIterations != -1) stopped = true
+
+        updateLogbook()
+    }
+
+    private fun updateLogbook() {
+        logbook += logVariables.map { LogbookEntry(it, this[it], iterations) }
+    }
+
+    private fun List<Expr>.run() = forEach { it.eval(this@Interpreter) }
+
     fun run() {
-        while (isRunning) step()
+        while (!stopped) iterate()
     }
 
     operator fun get(name: String): Float {
@@ -68,4 +91,12 @@ class Interpreter(val parsed: List<Expr>) {
 
         memory[name] = value
     }
+
+    fun stop() {
+        stopped = true
+    }
+
+    fun toTSV() = "${(listOf("t") + logVariables).joinToString("\t")}\n" + logbook.mapIndexed { t, v ->
+        "$t\t${v.joinToString("\t") { it.value.toString() }}"
+    }.joinToString("\n")
 }
