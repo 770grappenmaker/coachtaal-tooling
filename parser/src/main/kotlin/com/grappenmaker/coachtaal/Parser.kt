@@ -1,56 +1,6 @@
 package com.grappenmaker.coachtaal
 
-import java.io.File
 import kotlin.math.pow
-
-// Example
-fun main() {
-    val initialize = parseProgram(
-        """
-            t = 0
-            m = 0,0050
-            g = 9,81
-            Fz = m * g
-            x = 0
-            y = 1,5
-            v = 20
-            alfa = 15 * Pi / 180
-            k = 0,003
-            vx = v * cos(alfa)
-            vy = v * sin(alfa)
-            dt = 0,001
-        """.trimIndent()
-    )
-
-    val iteration = parseProgram(
-        """
-            v = sqrt(vx^2 + vy^2)
-            Fw = k * v^2
-            Fwx = Fw * (vx / v)
-            Fresx = -Fwx
-            Fwy = Fw * (vy / v)
-            Fresy = -Fz - Fwy
-
-            ax = Fresx / m
-            ay = Fresy / m
-
-            vx = vx + ax * dt
-            vy = vy + ay * dt
-
-            x = x + vx * dt
-            y = y + vy * dt
-
-            t = t + dt
-            als y <= 0 dan stop eindals
-        """.trimIndent()
-    )
-
-    File("test.tsv").writeText(Interpreter(
-        iteration,
-        initialize,
-        logVariables = setOf("y", "x")
-    ).apply { run() }.toTSV())
-}
 
 fun parseProgram(contents: String) = parseProgram(lexer(contents))
 fun parseProgram(tokens: List<Token>) = Parser(tokens).parseFull()
