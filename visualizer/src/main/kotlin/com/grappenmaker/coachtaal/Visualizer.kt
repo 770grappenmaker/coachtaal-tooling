@@ -17,6 +17,7 @@ fun main() {
     val initialize = parseProgram(
         """
             t = 0
+            dt = 0,001
             m = 0,0050
             g = 9,81
             Fz = m * g
@@ -27,7 +28,6 @@ fun main() {
             k = 0,003
             vx = v * cos(alfa)
             vy = v * sin(alfa)
-            dt = 0,001
         """.trimIndent()
     )
 
@@ -62,7 +62,7 @@ fun main() {
     val interpreter = Interpreter(
         iteration,
         initialize,
-        logVariables = setOf("y", "x")
+        logVariables = setOf("x", "y"),
     )
 
     interpreter.run()
@@ -128,30 +128,49 @@ class VisualizerScreen(
         shapes.use(ShapeRenderer.ShapeType.Line, cam) {
             plot.windowed(2).forEach { (a, b) ->
                 shapes.line(
-                    a.first * xScale + margin,
-                    a.second * yScale + margin,
-                    b.first * xScale + margin,
-                    b.second * yScale + margin,
+                    (a.first - minX) * xScale + margin,
+                    (a.second - minY) * yScale + margin,
+                    (b.first - minX) * xScale + margin,
+                    (b.second - minY) * yScale + margin,
                 )
             }
 
-            shapes.line(margin, margin, viewport.worldWidth - margin, margin)
-            shapes.line(margin, margin, margin, viewport.worldHeight - tripleMargin)
+            shapes.line(margin, margin - minY * yScale, viewport.worldWidth - margin, margin - minY * yScale)
+            shapes.line(margin - minX * xScale, margin, margin - minX * xScale, viewport.worldHeight - tripleMargin)
+
+            val mx = Gdx.input.x.toFloat()
+            if (mx in margin..Gdx.graphics.width - margin) {
+                val closestValue = valueAt((mx - margin) / xScale)
+                shapes.line(
+                    mx - minX * xScale,
+                    margin - minY * yScale,
+                    mx - minX * xScale,
+                    viewport.worldHeight - tripleMargin - (maxY - closestValue) * yScale
+                )
+            }
         }
 
         shapes.use(ShapeRenderer.ShapeType.Filled, cam) {
             if (lineThickness > 0f) {
-                plot.forEach { (x, y) -> shapes.circle(x * xScale + margin, y * yScale + margin, lineThickness) }
+                plot.forEach { (x, y) ->
+                    shapes.circle(
+                        (x - minX) * xScale + margin,
+                        (y - minY) * yScale + margin,
+                        lineThickness
+                    )
+                }
             }
         }
 
         sprites.use(cam) {
-            font.draw(it, "($yVariable,$xVariable) diagram: ${logbook.size} points / " +
-                    "Window: X = [${minX.formatShort()}, ${maxX.formatShort()}], " +
-                    "Y = [${minY.formatShort()}, ${maxY.formatShort()}]", 5f, Gdx.graphics.height - 5f)
+            font.draw(
+                it, "($yVariable,$xVariable) diagram: ${logbook.size} points / " +
+                        "Window: X = [${minX.formatShort()}, ${maxX.formatShort()}], " +
+                        "Y = [${minY.formatShort()}, ${maxY.formatShort()}]", 5f, Gdx.graphics.height - 5f
+            )
 
-            font.draw(it, yVariable, doubleMargin, viewport.worldHeight - tripleMargin)
-            font.draw(it, xVariable, viewport.worldWidth - doubleMargin, tripleMargin)
+            font.draw(it, yVariable, doubleMargin - minX * xScale, viewport.worldHeight - tripleMargin)
+            font.draw(it, xVariable, viewport.worldWidth - doubleMargin, tripleMargin - minY * yScale)
         }
     }
 
@@ -166,5 +185,7 @@ class VisualizerScreen(
         cam.center()
     }
 
-    private fun Float.formatShort() = "%.1f".format(this)
+    // TODO: binary search
+    private fun valueAt(x: Float) = plot.minBy { (a) -> (x - a).absoluteValue }.second
+    private fun Float.formatShort() = "%.1f".format(null, this)
 }

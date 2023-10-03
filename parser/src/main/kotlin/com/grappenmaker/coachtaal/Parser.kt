@@ -19,22 +19,6 @@ private inline fun <T> parseSingle(tokens: List<Token>, method: Parser.() -> T):
     }
 }
 
-val binaryOperators = mapOf<String, (Float, Float) -> Float>(
-    "=" to { a, b -> (a == b).asCoach },
-    "<>" to { a, b -> (a != b).asCoach },
-    "<=" to { a, b -> (a <= b).asCoach },
-    ">=" to { a, b -> (a >= b).asCoach },
-    "<" to { a, b -> (a < b).asCoach },
-    ">" to { a, b -> (a > b).asCoach },
-    "+" to Float::plus,
-    "-" to Float::minus,
-    "/" to Float::div,
-    "*" to Float::times,
-    "^" to Float::pow,
-)
-
-fun findOperator(info: BinaryOperatorToken) = binaryOperators.getValue(info.operator)
-
 private fun unexpected(token: Token): Nothing =
     error("Unexpected token ${token.info.javaClass.simpleName} at ${token.line}:${token.column}, \"${token.lexeme}\"")
 
@@ -215,6 +199,22 @@ class Parser(val tokens: List<Token>) {
             skipNewLine()
         }
     }
+
+    private val binaryOperators = mapOf<String, (Float, Float) -> Float>(
+        "=" to { a, b -> (a == b).asCoach },
+        "<>" to { a, b -> (a != b).asCoach },
+        "<=" to { a, b -> (a <= b).asCoach },
+        ">=" to { a, b -> (a >= b).asCoach },
+        "<" to { a, b -> (a < b).asCoach },
+        ">" to { a, b -> (a > b).asCoach },
+        "+" to Float::plus,
+        "-" to Float::minus,
+        "/" to Float::div,
+        "*" to Float::times,
+        "^" to Float::pow,
+    )
+
+    private fun findOperator(info: BinaryOperatorToken) = binaryOperators.getValue(info.operator)
 }
 
 sealed interface ExprResult {
