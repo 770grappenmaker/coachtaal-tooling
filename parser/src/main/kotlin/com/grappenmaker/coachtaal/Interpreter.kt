@@ -64,14 +64,19 @@ class Interpreter(
         iteration.run()
         if (++iterations >= maxIterations && maxIterations != -1) stopped = true
 
-        updateLogbook()
+        if (!stopped) updateLogbook()
     }
 
     private fun updateLogbook() {
         logbook += logVariables.map { LogbookEntry(it, this[it], iterations) }
     }
 
-    private fun List<Expr>.run() = forEach { it.eval(this@Interpreter) }
+    private fun List<Expr>.run() {
+        for (expr in this) {
+            if (stopped) return
+            expr.eval(this@Interpreter)
+        }
+    }
 
     fun run() {
         while (!stopped) iterate()

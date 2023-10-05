@@ -1,6 +1,7 @@
 package com.grappenmaker.coachtaal
 
 import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.Input
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
 import com.badlogic.gdx.graphics.OrthographicCamera
 import com.badlogic.gdx.graphics.g2d.BitmapFont
@@ -12,6 +13,7 @@ import ktx.app.KtxScreen
 import ktx.graphics.center
 import ktx.graphics.use
 import kotlin.math.absoluteValue
+import kotlin.system.measureTimeMillis
 
 fun main() {
     val initialize = parseProgram(
@@ -33,40 +35,68 @@ fun main() {
 
     val iteration = parseProgram(
         """
-           v = sqrt(vx^2 + vy^2)
-           
-           Fw = k * v^2
-           Fwx = Fw * (vx / v)
-           Fwy = Fw * (vy / v)
-           
-           Fresx = -Fwx
-           Fresy = -Fz - Fwy
-           
-           ax = Fresx / m
-           ay = Fresy / m
-           
-           vx = vx + ax * dt
-           vy = vy + ay * dt
-           
-           x = x + vx * dt
-           y = y + vy * dt
-           
-           t = t + dt
-           als y <= 0 dan
-               stop
-               y = 0
-           eindals
+            v = sqrt(vx^2 + vy^2)
+            
+            Fw = k * v^2
+            Fwx = Fw * (vx / v)
+            Fwy = Fw * (vy / v)
+            
+            Fresx = -Fwx
+            Fresy = -Fz - Fwy
+            
+            ax = Fresx / m
+            ay = Fresy / m
+            
+            vx = vx + ax * dt
+            vy = vy + ay * dt
+            
+            x = x + vx * dt
+            y = y + vy * dt
+            
+            t = t + dt
+            als y <= 0 dan
+                stop
+                y = 0
+            eindals
         """.trimIndent()
     )
 
+    val iteration2 = parseProgram("""
+        ddtheta = k * sin(theta)
+        als luchtweerstand dan ddtheta = ddtheta - mu * dtheta eindals
+        
+        dtheta = dtheta + ddtheta * dt
+        theta = theta + dtheta * dt
+        
+        'benadering:
+        'y = theta0 * cos(sqrt(-k) * t)
+        
+        t = t + dt
+        als t >= tmax dan stop eindals
+    """.trimIndent())
+
+    val initialize2 = parseProgram("""
+        luchtweerstand = aan
+        dt = 0,001
+        tmax = 10
+        
+        theta0 = 30 * Pi / 180
+        theta = theta0
+        
+        g = 9,81
+        l = 5
+        k = -g/l
+        mu = 0,3
+    """.trimIndent())
+
     val interpreter = Interpreter(
-        iteration,
-        initialize,
-        logVariables = setOf("x", "y"),
+        iteration2,
+        initialize2,
+        logVariables = setOf("t", "theta"),
     )
 
-    interpreter.run()
-    interpreter.logbook.visualize("x", "y")
+    println("Took ${measureTimeMillis { interpreter.run() }}ms to evaluate model")
+    interpreter.logbook.visualize("t", "theta")
 }
 
 fun List<List<LogbookEntry>>.visualize(xVariable: String, yVariable: String) =
@@ -119,33 +149,69 @@ class VisualizerScreen(
     private val tripleMargin = margin * 3f
     private val quadMargin = margin * 4f
 
+    private var xOffset = 0f
+    private var yOffset = 0f
+    private var zoom = 1f
+
     override fun render(delta: Float) {
+        if (Gdx.input.isButtonPressed(Input.Buttons.LEFT)) {
+            xOffset += Gdx.input.deltaX
+            yOffset -= Gdx.input.deltaY
+        }
+
+        if (Gdx.input.isKeyPressed(Input.Keys.UP)) zoom -= delta
+        if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) zoom += delta
+        zoom = zoom.clamp(.1f, 3f)
+
         cam.update()
 
-        val xScale = (viewport.worldWidth - doubleMargin) / widthUnscaled
-        val yScale = (viewport.worldHeight - quadMargin) / heightUnscaled
+        val xScale = (viewport.worldWidth - doubleMargin) / widthUnscaled * zoom
+        val yScale = (viewport.worldHeight - quadMargin) / heightUnscaled * zoom
 
         shapes.use(ShapeRenderer.ShapeType.Line, cam) {
             plot.windowed(2).forEach { (a, b) ->
                 shapes.line(
-                    (a.first - minX) * xScale + margin,
-                    (a.second - minY) * yScale + margin,
-                    (b.first - minX) * xScale + margin,
-                    (b.second - minY) * yScale + margin,
+                    (a.first - minX) * xScale + margin + xOffset,
+                    (a.second - minY) * yScale + margin + yOffset,
+                    (b.first - minX) * xScale + margin + xOffset,
+                    (b.second - minY) * yScale + margin + yOffset,
                 )
             }
 
-            shapes.line(margin, margin - minY * yScale, viewport.worldWidth - margin, margin - minY * yScale)
-            shapes.line(margin - minX * xScale, margin, margin - minX * xScale, viewport.worldHeight - tripleMargin)
+            shapes.line(
+                margin,
+                margin - minY * yScale + yOffset,
+                viewport.worldWidth - margin,
+                margin - minY * yScale + yOffset
+            )
 
-            val mx = Gdx.input.x.toFloat()
-            if (mx in margin..Gdx.graphics.width - margin) {
-                val closestValue = valueAt((mx - margin) / xScale)
+            shapes.line(
+                margin - minX * xScale + xOffset,
+                margin,
+                margin - minX * xScale + xOffset,
+                viewport.worldHeight - tripleMargin
+            )
+        }
+
+        val mx = Gdx.input.x.toFloat()
+        if (mx - margin - xOffset in 0f..maxX * xScale) {
+            val approxX = (mx - margin - xOffset) / xScale
+            val approxY = valueAt(approxX)
+            shapes.use(ShapeRenderer.ShapeType.Line, cam) {
                 shapes.line(
                     mx - minX * xScale,
-                    margin - minY * yScale,
+                    margin - minY * yScale + yOffset,
                     mx - minX * xScale,
-                    viewport.worldHeight - tripleMargin - (maxY - closestValue) * yScale
+                    margin + (approxY - minY) * yScale + yOffset
+                )
+            }
+
+            sprites.use(cam) {
+                font.draw(
+                    it,
+                    "$xVariable=${approxX.formatShort()},$yVariable=${approxY.formatShort()}",
+                    mx - minX * xScale + margin,
+                    margin + (approxY - minY) * yScale + yOffset
                 )
             }
         }
@@ -154,8 +220,8 @@ class VisualizerScreen(
             if (lineThickness > 0f) {
                 plot.forEach { (x, y) ->
                     shapes.circle(
-                        (x - minX) * xScale + margin,
-                        (y - minY) * yScale + margin,
+                        (x - minX) * xScale + margin + xOffset,
+                        (y - minY) * yScale + margin + yOffset,
                         lineThickness
                     )
                 }
@@ -163,14 +229,31 @@ class VisualizerScreen(
         }
 
         sprites.use(cam) {
+            val xoScaled = xOffset / xScale
+            val yoScaled = yOffset / yScale
+
             font.draw(
                 it, "($yVariable,$xVariable) diagram: ${logbook.size} points / " +
-                        "Window: X = [${minX.formatShort()}, ${maxX.formatShort()}], " +
-                        "Y = [${minY.formatShort()}, ${maxY.formatShort()}]", 5f, Gdx.graphics.height - 5f
+                        "Window: $xVariable = [${(minX / zoom + xoScaled).formatShort()}, " +
+                        "${(maxX / zoom + xoScaled).formatShort()}], " +
+                        "$yVariable = [${(minY / zoom + yoScaled).formatShort()}, " +
+                        "${(maxY / zoom + yoScaled).formatShort()}]",
+                5f, viewport.worldHeight - 5f
             )
 
-            font.draw(it, yVariable, doubleMargin - minX * xScale, viewport.worldHeight - tripleMargin)
-            font.draw(it, xVariable, viewport.worldWidth - doubleMargin, tripleMargin - minY * yScale)
+            font.draw(
+                it,
+                yVariable,
+                (doubleMargin - minX * xScale + xOffset).clamp(doubleMargin, viewport.worldWidth - doubleMargin),
+                viewport.worldHeight - tripleMargin
+            )
+
+            font.draw(
+                it,
+                xVariable,
+                viewport.worldWidth - doubleMargin,
+                (tripleMargin - minY * yScale + yOffset).clamp(tripleMargin, viewport.worldHeight - tripleMargin)
+            )
         }
     }
 
@@ -185,7 +268,33 @@ class VisualizerScreen(
         cam.center()
     }
 
-    // TODO: binary search
-    private fun valueAt(x: Float) = plot.minBy { (a) -> (x - a).absoluteValue }.second
+    private fun valueAt(targetX: Float, interpolate: Boolean = false): Float {
+        var min = 0
+        var max = plot.indices.last
+
+        while (min <= max) {
+            val pivot = (min + max) / 2
+            val (x, y) = plot[pivot]
+            when {
+                x < targetX -> min = pivot + 1
+                x > targetX -> max = pivot - 1
+                else -> return y
+            }
+        }
+
+        return when {
+            min !in plot.indices -> plot.last().second
+            interpolate -> {
+                val (x1, y1) = plot[min]
+                val (x2, y2) = plot[max]
+                val slope = (y2 - y1) / (x2 - x1)
+                y1 + slope * (targetX - x1)
+            }
+            else -> plot[min].second
+        }
+    }
+
     private fun Float.formatShort() = "%.1f".format(null, this)
 }
+
+fun Float.clamp(min: Float, max: Float) = coerceAtLeast(min).coerceAtMost(max)

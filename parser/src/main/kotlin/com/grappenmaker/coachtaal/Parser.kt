@@ -124,8 +124,8 @@ class Parser(val tokens: List<Token>) {
         }
     }
 
-    fun multiply() = binaryOperator(parseLeft = ::unary, operators = setOf("*", "/"))
-    fun add() = binaryOperator(parseLeft = ::multiply, operators = setOf("+", "-"))
+    fun multiply() = binaryOperator(parseLeft = ::unary, operators = setOf("*", "/", "&&"))
+    fun add() = binaryOperator(parseLeft = ::multiply, operators = setOf("+", "-", "||"))
     fun compare() = binaryOperator(parseLeft = ::add, operators = setOf("=", "<>", "<", ">", "<=", ">="))
 
     fun assignment(id: Identifier) = AssignmentExpr(id, compare())
@@ -140,7 +140,7 @@ class Parser(val tokens: List<Token>) {
         val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in setOf("anders", "eindals") }
         eofError()
 
-        val seenEnd = (peek().info as Identifier).value == "eindals"
+        val seenEnd = (peek().info as? Identifier)?.value == "eindals"
         advance()
 
         val curr = if (!seenEnd && !isAtEnd) peek().info else null
@@ -212,6 +212,8 @@ class Parser(val tokens: List<Token>) {
         "/" to Float::div,
         "*" to Float::times,
         "^" to Float::pow,
+        "&&" to { a, b -> (a.asCoachBoolean && b.asCoachBoolean).asCoach },
+        "||" to { a, b -> (a.asCoachBoolean || b.asCoachBoolean).asCoach },
     )
 
     private fun findOperator(info: BinaryOperatorToken) = binaryOperators.getValue(info.operator)

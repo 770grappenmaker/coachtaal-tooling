@@ -3,8 +3,8 @@ package com.grappenmaker.coachtaal
 val nameTokens = mapOf(
     "wordt" to AssignmentToken,
     "niet" to NotToken,
-    "of" to OrToken,
-    "en" to AndToken,
+    "of" to BinaryOperatorToken("||"),
+    "en" to BinaryOperatorToken("&&"),
 )
 
 fun lexer(input: String): List<Token> {
