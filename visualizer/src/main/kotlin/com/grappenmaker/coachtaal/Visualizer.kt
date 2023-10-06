@@ -13,90 +13,50 @@ import ktx.app.KtxScreen
 import ktx.graphics.center
 import ktx.graphics.use
 import kotlin.math.absoluteValue
-import kotlin.system.measureTimeMillis
+import kotlin.time.measureTimedValue
 
 fun main() {
-    val initialize = parseProgram(
-        """
-            t = 0
-            dt = 0,001
-            m = 0,0050
-            g = 9,81
-            Fz = m * g
-            x = 0
-            y = 1,5
-            v = 20
-            alfa = 15 * Pi / 180
-            k = 0,003
-            vx = v * cos(alfa)
-            vy = v * sin(alfa)
-        """.trimIndent()
-    )
+    val iterProgram = parseProgram("""
+        dm = k * dt
+        mb = mb - dm
+        als mb <= 0 dan stop eindals
 
-    val iteration = parseProgram(
-        """
-            v = sqrt(vx^2 + vy^2)
-            
-            Fw = k * v^2
-            Fwx = Fw * (vx / v)
-            Fwy = Fw * (vy / v)
-            
-            Fresx = -Fwx
-            Fresy = -Fz - Fwy
-            
-            ax = Fresx / m
-            ay = Fresy / m
-            
-            vx = vx + ax * dt
-            vy = vy + ay * dt
-            
-            x = x + vx * dt
-            y = y + vy * dt
-            
-            t = t + dt
-            als y <= 0 dan
-                stop
-                y = 0
-            eindals
-        """.trimIndent()
-    )
-
-    val iteration2 = parseProgram("""
-        ddtheta = k * sin(theta)
-        als luchtweerstand dan ddtheta = ddtheta - mu * dtheta eindals
-        
-        dtheta = dtheta + ddtheta * dt
-        theta = theta + dtheta * dt
-        
-        'benadering:
-        'y = theta0 * cos(sqrt(-k) * t)
-        
+        m = mt + mb
+        Fz = m * g
+        Fstuw = k * c
+        Fres = Fstuw - Fz
+        a = Fres / m
+        v = v + a * dt
         t = t + dt
-        als t >= tmax dan stop eindals
     """.trimIndent())
 
-    val initialize2 = parseProgram("""
-        luchtweerstand = aan
-        dt = 0,001
-        tmax = 10
-        
-        theta0 = 30 * Pi / 180
-        theta = theta0
-        
-        g = 9,81
-        l = 5
-        k = -g/l
-        mu = 0,3
-    """.trimIndent())
-
-    val interpreter = Interpreter(
-        iteration2,
-        initialize2,
-        logVariables = setOf("t", "theta"),
+    val initProgram = parseProgram(
+        """
+            k = 2125
+            mb = 255000
+            mr = 170000
+            mc = 7500
+            mt = mr + mc
+            g = 9,81
+            c = 3000
+            v = 0
+            dt = 0,001
+            t = 0
+        """.trimIndent()
     )
 
-    println("Took ${measureTimeMillis { interpreter.run() }}ms to evaluate model")
-    interpreter.logbook.visualize("t", "theta")
+    val model = loadCompiledModel<CompiledModel>("Unnamed0", compileModel(iterProgram, initProgram))
+
+    // Remove logging in run and it is blazingly fast (4ms)
+    val result = measureTimedValue { model.run(logVariables = setOf("t", "v")) }
+    println("Took ${result.duration.inWholeMilliseconds}ms to evaluate model")
+
+    result.value.visualize("t", "v")
+
+//    val interpreter = Interpreter(iterProgram, initProgram, logVariables = setOf("t", "v"))
+//    println("Took ${measureTimeMillis { interpreter.run() }}ms to evaluate model")
+//    println(interpreter.logbook.takeLast(10))
+//    interpreter.logbook.visualize("t", "v")
 }
 
 fun List<List<LogbookEntry>>.visualize(xVariable: String, yVariable: String) =

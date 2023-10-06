@@ -1,13 +1,13 @@
 package com.grappenmaker.coachtaal
 
-val nameTokens = mapOf(
-    "wordt" to AssignmentToken,
-    "niet" to NotToken,
-    "of" to BinaryOperatorToken("||"),
-    "en" to BinaryOperatorToken("&&"),
-)
+fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
+    val nameTokens = mapOf(
+        language.assignmentLiteral to AssignmentToken,
+        language.notOperator to NotToken,
+        language.orOperator to BinaryOperatorToken("||"),
+        language.andOperator to BinaryOperatorToken("&&"),
+    )
 
-fun lexer(input: String): List<Token> {
     var ptr = 0
     var lineStart = 0
     var line = 1
@@ -119,8 +119,6 @@ data object NewLineToken : TokenInfo
 data object AssignmentToken : TokenInfo
 data object InvalidToken : TokenInfo
 data object NotToken : TokenInfo
-data object AndToken : TokenInfo
-data object OrToken : TokenInfo
 data object ParameterSeparatorToken : TokenInfo
 
 // We don't know what the equals token means until parsing

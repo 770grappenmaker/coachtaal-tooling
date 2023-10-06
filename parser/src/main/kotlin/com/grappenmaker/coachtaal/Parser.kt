@@ -19,25 +19,28 @@ private inline fun <T> parseSingle(tokens: List<Token>, method: Parser.() -> T):
     }
 }
 
-private fun unexpected(token: Token): Nothing =
-    error("Unexpected token ${token.info.javaClass.simpleName} at ${token.line}:${token.column}, \"${token.lexeme}\"")
+private fun unexpected(token: Token, extra: String? = null): Nothing =
+    error("Unexpected token ${token.info.javaClass.simpleName} " +
+            "at line ${token.line}, column ${token.column}, \"${token.lexeme}\"" +
+            if (extra != null)  ": $extra" else ""
+    )
 
-class Parser(val tokens: List<Token>) {
+class Parser(val tokens: List<Token>, private val language: Language = DutchLanguage) {
     var ptr = 0
     val isAtEnd get() = ptr !in tokens.indices
 
     // Can do ptr - 1 because of the empty check at the start
-    private fun eofError() = require(!isAtEnd) {
+    private fun eofError(message: String? = null) = require(!isAtEnd) {
         val token = tokens[ptr - 1]
-        "Unexpected EOF at ${token.line}:${token.column}"
+        "Unexpected EOF at line ${token.line}, col ${token.column}: ${message ?: "this is a bug"}"
     }
 
     // Returns the current token and goes to the next
-    private fun take(skipNewLine: Boolean = true): Token {
-        eofError()
+    private fun take(expectedMessage: String? = null, skipNewLine: Boolean = true): Token {
+        eofError(expectedMessage)
         while (skipNewLine && tokens[ptr].info is NewLineToken) {
             advance()
-            eofError()
+            eofError(expectedMessage)
         }
 
         val returned = tokens[ptr]
@@ -46,8 +49,8 @@ class Parser(val tokens: List<Token>) {
     }
 
     // Returns the current token
-    private fun peek(skipNewLine: Boolean = true): Token {
-        eofError()
+    private fun peek(expectedMessage: String? = null, skipNewLine: Boolean = true): Token {
+        eofError(expectedMessage)
 
         // Do not want to alter state, use temporary variable
         var tempPtr = ptr
@@ -56,17 +59,20 @@ class Parser(val tokens: List<Token>) {
     }
 
     // Returns all next tokens satisfying [cond]
-    fun takeWhile(skipNewLine: Boolean = true, cond: (TokenInfo) -> Boolean): List<Token> {
+    private fun takeWhile(skipNewLine: Boolean = true, cond: (TokenInfo) -> Boolean): List<Token> {
+        if (isAtEnd) return emptyList()
+
         val start = ptr
         while (ptr + 1 in tokens.indices &&
             (skipNewLine && tokens[ptr + 1].info is NewLineToken || cond(tokens[ptr + 1].info))
         ) advance()
 
-        return tokens.slice(start..ptr)
+        advance()
+        return tokens.slice(start until ptr)
     }
 
     // Skips all newlines
-    fun skipNewLine() {
+    private fun skipNewLine() {
         while (!isAtEnd && tokens[ptr].info is NewLineToken) advance()
     }
 
@@ -75,15 +81,17 @@ class Parser(val tokens: List<Token>) {
     }
 
     fun primary(): Expr {
-        val curr = take()
-        if (!isAtEnd && peek().info is GroupToken)
-            return call(curr.info as? Identifier ?: unexpected(curr))
+        val curr = take("expected identifier, number or parenthesized expression")
+        if (!isAtEnd && peek().info is GroupToken) {
+            if (curr.info !is Identifier) unexpected(curr, "parenthesized expression after non-identifier")
+            return call(curr)
+        }
 
         return when (val info = curr.info) {
             is Identifier -> IdentifierExpr(info)
             is NumberToken -> LiteralExpr(info.value)
             is GroupToken -> parseExpression(info.tokens)
-            else -> unexpected(curr)
+            else -> unexpected(curr, "expected identifier, number or parenthesized expression")
         }
     }
 
@@ -98,7 +106,7 @@ class Parser(val tokens: List<Token>) {
             if (info.operator !in operators) break
             advance()
 
-            first = BinaryOperatorExpr(first, parseRight(), findOperator(info))
+            first = BinaryOperatorExpr(first, parseRight(), findOperator(info), info.operator)
         }
 
         return first
@@ -131,34 +139,35 @@ class Parser(val tokens: List<Token>) {
     fun assignment(id: Identifier) = AssignmentExpr(id, compare())
 
     fun ifStatement(): Expr {
-        val condition = takeWhile { it !is Identifier || it.value.lowercase() != "dan" }
-        eofError()
+        val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.ifThen }
 
-        advance()
-        advance()
-
-        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in setOf("anders", "eindals") }
-        eofError()
-
-        val seenEnd = (peek().info as? Identifier)?.value == "eindals"
+        eofError("""no "${language.ifThen}" after "als"""")
         advance()
 
-        val curr = if (!seenEnd && !isAtEnd) peek().info else null
-        val whenFalse = if (curr is Identifier && curr.value.lowercase() == "anders") {
-            advance()
-            takeWhile { it !is Identifier || it.value.lowercase() != "eindals" }
+        val expectedConditionals = setOf(language.elseStatement, language.endIfStatement)
+        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in expectedConditionals }
+        eofError("""no "${language.elseStatement}" or "${language.endIfStatement}" after "${language.ifThen}"""")
+
+        val seenEnd = (peek().info as? Identifier)?.value == language.endIfStatement
+        advance()
+
+        val expectElse = !seenEnd && !isAtEnd
+        val whenFalse = if (expectElse) takeWhile {
+            it !is Identifier || it.value.lowercase() != language.endIfStatement
         } else null
 
-        eofError()
-        advance()
-        if (curr != null) advance()
+        if (expectElse) {
+            eofError("""expected "${language.endIfStatement}" after "${language.elseStatement}"""")
+            advance()
+        }
 
         return ConditionalExpr(parseExpression(condition), parseBlock(whenTrue), whenFalse?.let(::parseBlock))
     }
 
-    fun call(id: Identifier): Expr {
-        if (id.value.lowercase() == "als") return ifStatement()
-        if (isAtEnd) return CallExpr(id, emptyList())
+    fun call(idToken: Token): Expr {
+        val id = idToken.info as? Identifier ?: unexpected(idToken, "expected an identifier in a call")
+        if (id.value.lowercase() == language.ifStatement) return ifStatement()
+        if (isAtEnd) return CallExpr(id, emptyList(), idToken)
 
         val curr = peek()
         val info = curr.info
@@ -167,35 +176,39 @@ class Parser(val tokens: List<Token>) {
         val arguments = (info as? GroupToken)?.verify()?.tokens
             ?.split { it.info is ParameterSeparatorToken } ?: emptyList()
 
-        return CallExpr(id, arguments.map { parseExpression(it) })
+        return CallExpr(id, arguments.map { parseExpression(it) }, idToken)
     }
 
     private fun GroupToken.verify(): GroupToken {
         val last = tokens.lastOrNull()
-        if (last?.info is ParameterSeparatorToken) unexpected(last)
+        if (last?.info is ParameterSeparatorToken) unexpected(last, "trailing comma in function call")
 
         unexpected(
-            (tokens.windowed(2).find { it.all { t -> t.info is ParameterSeparatorToken } } ?: return this).first()
+            (tokens.windowed(2).find { it.all { t -> t.info is ParameterSeparatorToken } } ?: return this).first(),
+            "double comma in parameter list"
         )
     }
 
     fun statement(): Expr {
         val currToken = take()
-        val identifier = currToken.info as? Identifier ?: unexpected(currToken)
+        val identifier = currToken.info as? Identifier
+            ?: unexpected(currToken, "statements should start with identifiers")
 
         return if (!isAtEnd) {
             val info = peek().info
             if (info is EqualsToken || info is AssignmentToken) {
                 advance()
                 assignment(identifier)
-            } else call(identifier)
-        } else call(identifier)
+            } else call(currToken)
+        } else call(currToken)
     }
 
     fun parseFull() = if (tokens.isEmpty()) emptyList() else buildList {
         while (!isAtEnd) {
-            add(statement())
-            if (!isAtEnd && tokens[ptr].info !is NewLineToken) unexpected(tokens[ptr])
+            val newStatement = statement()
+            add(newStatement)
+
+            if (!isAtEnd && tokens[ptr].info !is NewLineToken) unexpected(tokens[ptr], "after statement $newStatement")
             skipNewLine()
         }
     }
@@ -237,7 +250,8 @@ sealed interface Expr {
 data class BinaryOperatorExpr(
     val left: Expr,
     val right: Expr,
-    val operator: (Float, Float) -> Float
+    val operator: (Float, Float) -> Float,
+    val operatorToken: String,
 ) : Expr {
     override fun eval(interpreter: Interpreter) =
         ExprResult.Number(operator(left.eval(interpreter).number, right.eval(interpreter).number))
@@ -259,7 +273,7 @@ data class AssignmentExpr(val left: Identifier, val right: Expr) : Expr {
     }
 }
 
-data class CallExpr(val name: Identifier, val arguments: List<Expr>) : Expr {
+data class CallExpr(val name: Identifier, val arguments: List<Expr>, val debug: Token) : Expr {
     override fun eval(interpreter: Interpreter) =
         ExprResult(interpreter.call(name.value, arguments.map { it.eval(interpreter).number }))
 }
@@ -281,3 +295,16 @@ data class ConditionalExpr(val condition: Expr, val whenTrue: List<Expr>, val wh
 }
 
 fun List<Expr>.eval(interpreter: Interpreter) = forEach { it.eval(interpreter) }
+
+fun List<Expr>.extractVariables(language: Language = DutchLanguage): Set<String> =
+    flatMapTo(hashSetOf()) { it.extractVariables(language) } - language.allBuiltins
+
+fun Expr.extractVariables(language: Language = DutchLanguage): Set<String> = when (this) {
+    is AssignmentExpr -> setOf(left.value) + right.extractVariables(language)
+    is BinaryOperatorExpr -> left.extractVariables(language) + right.extractVariables(language)
+    is CallExpr -> arguments.extractVariables(language)
+    is ConditionalExpr -> condition.extractVariables(language) + whenTrue.extractVariables(language) +
+            (whenFalse?.extractVariables(language) ?: emptySet())
+    is IdentifierExpr -> setOf(value.value)
+    else -> emptySet()
+}

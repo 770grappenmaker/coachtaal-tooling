@@ -5,6 +5,7 @@ plugins {
 // TODO: version catalog the crap out of this
 dependencies {
     implementation(project(":parser"))
+    implementation(project(":compiler"))
 
     val gdxVersion = "1.11.0"
     implementation("com.badlogicgames.gdx:gdx:$gdxVersion")

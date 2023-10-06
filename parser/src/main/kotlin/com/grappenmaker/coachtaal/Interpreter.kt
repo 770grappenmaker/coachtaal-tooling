@@ -3,44 +3,53 @@ package com.grappenmaker.coachtaal
 import kotlin.math.*
 import kotlin.random.Random
 
-val coachConstants = mapOf(
-    "aan" to 255f,
-    "uit" to 0f,
-    "pi" to Math.PI.toFloat()
-)
-
-val coachBuiltins: Map<String, Interpreter.(args: List<Float>) -> Float?> = mapOf(
-    "abs" to { args -> args.first().absoluteValue },
-    "arcsin" to { (a) -> asin(a) },
-    "arccos" to { (a) -> acos(a) },
-    "arctan" to { (a) -> atan(a) },
-    "sin" to { (a) -> sin(a) },
-    "cos" to { (a) -> cos(a) },
-    "tan" to { (a) -> tan(a) },
-    "exp" to { (a) -> exp(a) },
-    "ln" to { (a) -> ln(a) },
-    "log" to { (a) -> log10(a) },
-    "sqr" to { (a) -> a * a },
-    "sqrt" to { (a) -> sqrt(a) },
-    "entier" to { (a) -> floor(a) },
-    "round" to { (a) -> round(a) },
-    "fac" to { (a) -> a.roundFactorial() },
-    "max" to { it.max() },
-    "min" to { it.min() },
-    "rand" to { Random.nextFloat() },
-    "teken" to { (a) -> a.sign },
-    "eenheidstap" to { (x, b) -> if (x < b) 0f else 1f },
-    "stop" to { stop() ; null }
-)
-
 data class LogbookEntry(val variable: String, val value: Float, val iteration: Int)
 
 class Interpreter(
     private val iteration: List<Expr>,
     initial: List<Expr> = emptyList(),
+    language: Language = EnglishLanguage,
     private val maxIterations: Int = -1,
     private val logVariables: Set<String> = emptySet()
 ) {
+    private val coachConstants = with(language) {
+        mapOf(
+            on to 255f,
+            off to 0f,
+            pi to Math.PI.toFloat()
+        )
+    }
+
+    private data class BuiltinData(val args: Int, val eval: (List<Float>) -> Float?)
+
+    private val coachBuiltins: Map<String, BuiltinData> = with(language) {
+        buildMap {
+            operator fun String.invoke(args: Int = 1, f: (List<Float>) -> Float?) = put(this, BuiltinData(args, f))
+
+            abs { (a) -> a.absoluteValue }
+            arcsin { (a) -> asin(a) }
+            arccos { (a) -> acos(a) }
+            arctan { (a) -> atan(a) }
+            sin { (a) -> sin(a) }
+            cos { (a) -> cos(a) }
+            tan { (a) -> tan(a) }
+            exp { (a) -> exp(a) }
+            ln { (a) -> ln(a) }
+            log { (a) -> log10(a) }
+            sqr { (a) -> a * a }
+            sqrt { (a) -> sqrt(a) }
+            floor { (a) -> floor(a) }
+            round { (a) -> round(a) }
+            factorial { (a) -> a.roundFactorial() }
+            max(-1) { it.max() }
+            min(-1) { it.min() }
+            random { Random.nextFloat() }
+            sign { (a) -> a.sign }
+            step(2) { (a, b) -> if (a < b) 0f else 1f }
+            stop(0) { stop(); null }
+        }
+    }
+
     var iterations = 0
         private set
 
@@ -50,8 +59,11 @@ class Interpreter(
     val memory = mutableMapOf<String, Float>()
     val logbook = mutableListOf<List<LogbookEntry>>()
 
-    fun call(name: String, arguments: List<Float>) =
-        (coachBuiltins[name.lowercase()] ?: TODO("Calling $name"))(arguments)
+    fun call(name: String, args: List<Float>): Float? {
+        val entry = coachBuiltins[name.lowercase()] ?: TODO("Calling $name")
+        require(entry.args == args.size || entry.args < 0) { "$name: Expected ${entry.args} args, got ${args.size}" }
+        return entry.eval(args)
+    }
 
     init {
         initial.run()
@@ -84,9 +96,6 @@ class Interpreter(
 
     operator fun get(name: String): Float {
         val lower = name.lowercase()
-        if (lower in coachBuiltins) return coachBuiltins.getValue(lower)(emptyList())
-            ?: error("Built-in procedure $name was referenced as identifier?")
-
         return coachConstants[lower] ?: memory[name] ?: 0f
     }
 
@@ -100,8 +109,4 @@ class Interpreter(
     fun stop() {
         stopped = true
     }
-
-    fun toTSV() = "${(listOf("t") + logVariables).joinToString("\t")}\n" + logbook.mapIndexed { t, v ->
-        "$t\t${v.joinToString("\t") { it.value.toString() }}"
-    }.joinToString("\n")
 }
