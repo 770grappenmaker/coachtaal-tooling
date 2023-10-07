@@ -2,15 +2,15 @@ package com.grappenmaker.coachtaal
 
 import kotlin.math.pow
 
-fun parseProgram(contents: String) = parseProgram(lexer(contents))
-fun parseProgram(tokens: List<Token>) = Parser(tokens).parseFull()
+fun parseProgram(contents: String, language: Language = DutchLanguage) = parseProgram(lexer(contents), language)
+fun parseProgram(tokens: List<Token>, language: Language = DutchLanguage) = Parser(tokens, language).parseFull()
 
-fun parseExpression(tokens: List<Token>) = parseSingle(tokens) { compare() }
-fun parseStatement(tokens: List<Token>) = parseSingle(tokens) { statement() }
-fun parseBlock(tokens: List<Token>) = parseSingle(tokens) { parseFull() }
+fun parseExpression(tokens: List<Token>, language: Language) = parseSingle(tokens, language) { compare() }
+fun parseStatement(tokens: List<Token>, language: Language) = parseSingle(tokens, language) { statement() }
+fun parseBlock(tokens: List<Token>, language: Language) = parseSingle(tokens, language) { parseFull() }
 
-private inline fun <T> parseSingle(tokens: List<Token>, method: Parser.() -> T): T {
-    val parser = Parser(tokens)
+private inline fun <T> parseSingle(tokens: List<Token>, language: Language, method: Parser.() -> T): T {
+    val parser = Parser(tokens, language)
     return parser.method().also {
         require(parser.isAtEnd) {
             "parsing statement had dangling tokens: ${parser.tokens.drop(parser.ptr)}" +
@@ -80,7 +80,7 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         ptr++
     }
 
-    fun primary(): Expr {
+    private fun primary(): Expr {
         val curr = take("expected identifier, number or parenthesized expression")
         if (!isAtEnd && peek().info is GroupToken) {
             if (curr.info !is Identifier) unexpected(curr, "parenthesized expression after non-identifier")
@@ -90,12 +90,16 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         return when (val info = curr.info) {
             is Identifier -> IdentifierExpr(info)
             is NumberToken -> LiteralExpr(info.value)
-            is GroupToken -> parseExpression(info.tokens)
+            is GroupToken -> parseExpression(info.tokens, language)
             else -> unexpected(curr, "expected identifier, number or parenthesized expression")
         }
     }
 
-    fun binaryOperator(parseLeft: () -> Expr, parseRight: () -> Expr = parseLeft, operators: Set<String>): Expr {
+    private fun binaryOperator(
+        parseLeft: () -> Expr,
+        parseRight: () -> Expr = parseLeft,
+        operators: Set<String>
+    ): Expr {
         var first = parseLeft()
 
         while (!isAtEnd) {
@@ -112,8 +116,8 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         return first
     }
 
-    fun power() = binaryOperator(parseLeft = ::primary, parseRight = ::unary, operators = setOf("^"))
-    fun unary(): Expr {
+    private fun power() = binaryOperator(parseLeft = ::primary, parseRight = ::unary, operators = setOf("^"))
+    private fun unary(): Expr {
         val curr = peek()
         val info = curr.info
 
@@ -132,13 +136,13 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         }
     }
 
-    fun multiply() = binaryOperator(parseLeft = ::unary, operators = setOf("*", "/", "&&"))
-    fun add() = binaryOperator(parseLeft = ::multiply, operators = setOf("+", "-", "||"))
+    private fun multiply() = binaryOperator(parseLeft = ::unary, operators = setOf("*", "/", "&&"))
+    private fun add() = binaryOperator(parseLeft = ::multiply, operators = setOf("+", "-", "||"))
     fun compare() = binaryOperator(parseLeft = ::add, operators = setOf("=", "<>", "<", ">", "<=", ">="))
 
-    fun assignment(id: Identifier) = AssignmentExpr(id, compare())
+    private fun assignment(id: Identifier) = AssignmentExpr(id, compare())
 
-    fun ifStatement(): Expr {
+    private fun ifStatement(): Expr {
         val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.ifThen }
 
         eofError("""no "${language.ifThen}" after "als"""")
@@ -161,10 +165,14 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
             advance()
         }
 
-        return ConditionalExpr(parseExpression(condition), parseBlock(whenTrue), whenFalse?.let(::parseBlock))
+        return ConditionalExpr(
+            condition = parseExpression(condition, language),
+            whenTrue = parseBlock(whenTrue, language),
+            whenFalse = whenFalse?.let { parseBlock(it, language) }
+        )
     }
 
-    fun call(idToken: Token): Expr {
+    private fun call(idToken: Token): Expr {
         val id = idToken.info as? Identifier ?: unexpected(idToken, "expected an identifier in a call")
         if (id.value.lowercase() == language.ifStatement) return ifStatement()
         if (isAtEnd) return CallExpr(id, emptyList(), idToken)
@@ -176,7 +184,7 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         val arguments = (info as? GroupToken)?.verify()?.tokens
             ?.split { it.info is ParameterSeparatorToken } ?: emptyList()
 
-        return CallExpr(id, arguments.map { parseExpression(it) }, idToken)
+        return CallExpr(id, arguments.map { parseExpression(it, language) }, idToken)
     }
 
     private fun GroupToken.verify(): GroupToken {
@@ -204,6 +212,8 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
     }
 
     fun parseFull() = if (tokens.isEmpty()) emptyList() else buildList {
+        skipNewLine()
+
         while (!isAtEnd) {
             val newStatement = statement()
             add(newStatement)
@@ -294,10 +304,14 @@ data class ConditionalExpr(val condition: Expr, val whenTrue: List<Expr>, val wh
     }
 }
 
+data class ParsedProgram(val lines: List<Expr>, val language: Language)
+
+fun ParsedProgram.eval(interpreter: Interpreter) = lines.eval(interpreter)
 fun List<Expr>.eval(interpreter: Interpreter) = forEach { it.eval(interpreter) }
 
 fun List<Expr>.extractVariables(language: Language = DutchLanguage): Set<String> =
-    flatMapTo(hashSetOf()) { it.extractVariables(language) } - language.allBuiltins
+    flatMapTo(hashSetOf()) { it.extractVariables(language) }
+        .filterTo(hashSetOf()) { it.lowercase() !in language.allBuiltins }
 
 fun Expr.extractVariables(language: Language = DutchLanguage): Set<String> = when (this) {
     is AssignmentExpr -> setOf(left.value) + right.extractVariables(language)

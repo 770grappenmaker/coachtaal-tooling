@@ -5,8 +5,12 @@ import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes.*
 
-private var unnamedCounter = 0
-    get() = field++
+inline fun <reified T : CompiledModel> createCompiledModel(
+    compiledName: String,
+    iter: List<Expr>,
+    init: List<Expr>,
+    language: Language = DutchLanguage,
+) = loadCompiledModel<T>(compiledName, compileModel(compiledName, iter, init, language, listOf(internalNameOf<T>())))
 
 inline fun <reified T : CompiledModel> loadCompiledModel(name: String, bytes: ByteArray): T {
     val loader = object : ClassLoader() {
@@ -18,14 +22,14 @@ inline fun <reified T : CompiledModel> loadCompiledModel(name: String, bytes: By
 }
 
 fun compileModel(
+    compiledName: String,
     iter: List<Expr>,
     init: List<Expr>,
     language: Language = DutchLanguage,
-    compiledName: String = "Unnamed$unnamedCounter",
     implements: List<String> = emptyList(),
 ) = generateClassBytes(
     name = compiledName,
-    implements = listOf(internalNameOf<CompiledModel>()) + implements,
+    implements = (listOf(internalNameOf<CompiledModel>()) + implements).distinct(),
     defaultConstructor = false
 ) {
     val variables = iter.extractVariables(language) + init.extractVariables(language)
@@ -73,7 +77,7 @@ fun compileModel(
         loadThis()
         visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
 
-        compile(init, compiledName)
+        compile(init, compiledName, language)
         returnMethod()
     }
 
@@ -84,13 +88,14 @@ fun compileModel(
         visitFieldInsn(GETFIELD, compiledName, "_stopped", "Z")
         visitJumpInsn(IFNE, label)
 
-        compile(iter, compiledName)
+        compile(iter, compiledName, language)
         visitLabel(label)
         returnMethod()
     }
 }
 
-private fun MethodVisitor.compile(program: List<Expr>, thisName: String) = program.forEach { compile(it, thisName) }
+private fun MethodVisitor.compile(program: List<Expr>, thisName: String, language: Language) =
+    program.forEach { compile(it, thisName, language) }
 
 private fun MethodVisitor.reference(id: Identifier, thisName: String) {
     loadThis()
@@ -120,14 +125,14 @@ private fun MethodVisitor.convertBoolean(opcode: Int, compareWithZero: Boolean =
 }
 
 private fun MethodVisitor.comparisonOperator(opcode: Int) = convertBoolean(opcode, false)
-private fun MethodVisitor.compile(expr: Expr, thisName: String) {
+private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Language) {
     when (expr) {
-        is AssignmentExpr -> update(expr.left, thisName) { compile(expr.right, thisName) }
+        is AssignmentExpr -> update(expr.left, thisName) { compile(expr.right, thisName, language) }
         is BinaryOperatorExpr -> {
-            compile(expr.left, thisName)
+            compile(expr.left, thisName, language)
             if (expr.operatorToken == "^") visitInsn(I2D)
 
-            compile(expr.right, thisName)
+            compile(expr.right, thisName, language)
             if (expr.operatorToken == "^") visitInsn(I2D)
 
             when (expr.operatorToken) {
@@ -155,20 +160,65 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String) {
         }
 
         is CallExpr -> {
-            compile(expr.arguments, thisName)
+            compile(expr.arguments, thisName, language)
 
             when (val name = expr.name.value) {
-                "stop" -> {
+                !in language.allBuiltins -> error("$name is not supported")
+                language.stop -> {
                     loadThis()
                     loadConstant(true)
                     visitFieldInsn(PUTFIELD, thisName, "_stopped", "Z")
                     returnMethod()
                 }
 
+                language.sqr -> {
+                    dup()
+                    visitInsn(FMUL)
+                }
+
+                language.factorial -> invokeMethod(Float::roundFactorial)
+                language.step -> {
+                    val label = Label()
+                    val end = Label()
+                    visitInsn(FCMPG)
+                    visitJumpInsn(IFLT, label)
+
+                    loadConstant(1f)
+                    visitJumpInsn(GOTO, end)
+
+                    visitLabel(label)
+                    loadConstant(0f)
+                    visitLabel(end)
+                }
+
+                language.random -> {
+                    invokeMethod(Math::random)
+                    visitInsn(D2F)
+                }
+
+                language.min, language.max -> {
+                    val actual = if (name == language.min) "min" else "max"
+                    repeat(expr.arguments.size - 1) {
+                        visitMethodInsn(INVOKESTATIC, "java/lang/Math", actual, "(FF)F", false)
+                    }
+                }
+
                 else -> {
                     val desc = "D".repeat(expr.arguments.size)
+                    val actualName = when (name) {
+                        language.arcsin -> "asin"
+                        language.arccos -> "acos"
+                        language.arctan -> "atan"
+                        language.floor -> "floor"
+                        language.round -> "round"
+                        language.sign -> "signum"
+                        language.log -> "log10"
+                        language.ln -> "log"
+                        else -> name
+                    }
+
                     visitInsn(F2D)
-                    visitMethodInsn(INVOKESTATIC, "java/lang/Math", name, "($desc)D", false)
+                    visitMethodInsn(INVOKESTATIC, "java/lang/Math", actualName, "($desc)D", false)
                     visitInsn(D2F)
                 }
             }
@@ -178,25 +228,30 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String) {
             val case = Label()
             val end = Label()
 
-            compile(expr.condition, thisName)
+            compile(expr.condition, thisName, language)
             loadConstant(0f)
             visitInsn(FCMPG)
             visitJumpInsn(IFGT, case)
 
-            expr.whenFalse?.let { compile(it, thisName) }
+            expr.whenFalse?.let { compile(it, thisName, language) }
             visitJumpInsn(GOTO, end)
 
             visitLabel(case)
-            compile(expr.whenTrue, thisName)
+            compile(expr.whenTrue, thisName, language)
 
             visitLabel(end)
         }
 
-        is IdentifierExpr -> reference(expr.value, thisName)
+        is IdentifierExpr -> when (expr.value.value.lowercase()) {
+            language.pi -> loadConstant(Math.PI.toFloat())
+            language.on -> loadConstant(255.0f)
+            language.off -> loadConstant(0.0f)
+            else -> reference(expr.value, thisName)
+        }
         is LiteralExpr -> loadConstant(expr.value)
         is NotExpr -> convertBoolean(IFEQ)
         is UnaryMinusExpr -> {
-            compile(expr.on, thisName)
+            compile(expr.on, thisName, language)
             visitInsn(FNEG)
         }
     }
@@ -214,7 +269,7 @@ fun CompiledModel.run(logVariables: Set<String> = emptySet()): List<List<Logbook
 
     while (!stopped) {
         iteration()
-        result += logVariables.map { LogbookEntry(it, memoryByName(it), iter) }
+        if (logVariables.isNotEmpty()) result += logVariables.map { LogbookEntry(it, memoryByName(it), iter) }
         iter++
     }
 

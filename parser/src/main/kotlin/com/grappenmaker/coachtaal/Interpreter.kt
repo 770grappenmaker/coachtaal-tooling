@@ -8,7 +8,7 @@ data class LogbookEntry(val variable: String, val value: Float, val iteration: I
 class Interpreter(
     private val iteration: List<Expr>,
     initial: List<Expr> = emptyList(),
-    language: Language = EnglishLanguage,
+    language: Language = DutchLanguage,
     private val maxIterations: Int = -1,
     private val logVariables: Set<String> = emptySet()
 ) {
@@ -80,7 +80,7 @@ class Interpreter(
     }
 
     private fun updateLogbook() {
-        logbook += logVariables.map { LogbookEntry(it, this[it], iterations) }
+        if (logVariables.isNotEmpty()) logbook += logVariables.map { LogbookEntry(it, this[it], iterations) }
     }
 
     private fun List<Expr>.run() {

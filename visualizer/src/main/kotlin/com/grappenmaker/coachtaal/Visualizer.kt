@@ -13,51 +13,6 @@ import ktx.app.KtxScreen
 import ktx.graphics.center
 import ktx.graphics.use
 import kotlin.math.absoluteValue
-import kotlin.time.measureTimedValue
-
-fun main() {
-    val iterProgram = parseProgram("""
-        dm = k * dt
-        mb = mb - dm
-        als mb <= 0 dan stop eindals
-
-        m = mt + mb
-        Fz = m * g
-        Fstuw = k * c
-        Fres = Fstuw - Fz
-        a = Fres / m
-        v = v + a * dt
-        t = t + dt
-    """.trimIndent())
-
-    val initProgram = parseProgram(
-        """
-            k = 2125
-            mb = 255000
-            mr = 170000
-            mc = 7500
-            mt = mr + mc
-            g = 9,81
-            c = 3000
-            v = 0
-            dt = 0,001
-            t = 0
-        """.trimIndent()
-    )
-
-    val model = loadCompiledModel<CompiledModel>("Unnamed0", compileModel(iterProgram, initProgram))
-
-    // Remove logging in run and it is blazingly fast (4ms)
-    val result = measureTimedValue { model.run(logVariables = setOf("t", "v")) }
-    println("Took ${result.duration.inWholeMilliseconds}ms to evaluate model")
-
-    result.value.visualize("t", "v")
-
-//    val interpreter = Interpreter(iterProgram, initProgram, logVariables = setOf("t", "v"))
-//    println("Took ${measureTimeMillis { interpreter.run() }}ms to evaluate model")
-//    println(interpreter.logbook.takeLast(10))
-//    interpreter.logbook.visualize("t", "v")
-}
 
 fun List<List<LogbookEntry>>.visualize(xVariable: String, yVariable: String) =
     Lwjgl3Application(VisualizerApp(this, xVariable, yVariable))
