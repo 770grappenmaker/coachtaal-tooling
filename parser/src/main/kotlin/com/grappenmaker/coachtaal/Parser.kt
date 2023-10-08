@@ -1,9 +1,11 @@
 package com.grappenmaker.coachtaal
 
+import kotlin.math.ceil
 import kotlin.math.pow
 
 fun parseProgram(contents: String, language: Language = DutchLanguage) = parseProgram(lexer(contents), language)
-fun parseProgram(tokens: List<Token>, language: Language = DutchLanguage) = Parser(tokens, language).parseFull()
+fun parseProgram(tokens: List<Token>, language: Language = DutchLanguage) =
+    ParsedProgram(Parser(tokens, language).parseFull(), language)
 
 fun parseExpression(tokens: List<Token>, language: Language) = parseSingle(tokens, language) { compare() }
 fun parseStatement(tokens: List<Token>, language: Language) = parseSingle(tokens, language) { statement() }
@@ -20,9 +22,10 @@ private inline fun <T> parseSingle(tokens: List<Token>, language: Language, meth
 }
 
 private fun unexpected(token: Token, extra: String? = null): Nothing =
-    error("Unexpected token ${token.info.javaClass.simpleName} " +
-            "at line ${token.line}, column ${token.column}, \"${token.lexeme}\"" +
-            if (extra != null)  ": $extra" else ""
+    error(
+        "Unexpected token ${token.info.javaClass.simpleName} " +
+                "at line ${token.line}, column ${token.column}, \"${token.lexeme}\"" +
+                if (extra != null) ": $extra" else ""
     )
 
 class Parser(val tokens: List<Token>, private val language: Language = DutchLanguage) {
@@ -145,7 +148,7 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
     private fun ifStatement(): Expr {
         val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.ifThen }
 
-        eofError("""no "${language.ifThen}" after "als"""")
+        eofError("""no "${language.ifThen}" after "${language.ifStatement}"""")
         advance()
 
         val expectedConditionals = setOf(language.elseStatement, language.endIfStatement)
@@ -172,9 +175,55 @@ class Parser(val tokens: List<Token>, private val language: Language = DutchLang
         )
     }
 
+    private fun redoStatement(): Expr {
+        // Weirdly enough, *any* expression is valid, not only literals
+        val amount = compare()
+        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.endRedo }
+
+        eofError("""no "${language.endRedo}" after "${language.redoStatement}"""")
+        advance()
+
+        return RepeatingExpr(parseBlock(body, language), amount)
+    }
+
+    private fun whileStatement(): Expr {
+        val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.startDo }
+
+        eofError("""no "${language.startDo}" after "${language.whileStatement}"""")
+        advance()
+
+        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.endDo }
+        eofError("""no "${language.endDo}" after "${language.startDo}"""")
+        advance()
+
+        return WhileExpr(
+            condition = parseExpression(condition, language),
+            body = parseBlock(body, language),
+        )
+    }
+
+    private fun repeatStatement(): Expr {
+        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.doWhileUntil }
+
+        eofError("""no "${language.doWhileUntil}" after "${language.doWhileStatement}"""")
+        advance()
+
+        return RepeatUntilExpr(compare(), parseBlock(body, language))
+    }
+
     private fun call(idToken: Token): Expr {
         val id = idToken.info as? Identifier ?: unexpected(idToken, "expected an identifier in a call")
-        if (id.value.lowercase() == language.ifStatement) return ifStatement()
+        when (id.value.lowercase()) {
+            language.ifStatement -> return ifStatement()
+            language.redoStatement -> return redoStatement()
+            language.whileStatement -> return whileStatement()
+            language.doWhileStatement -> return repeatStatement()
+            language.onceInvalidStatement -> unexpected(
+                idToken, "\"${language.onceInvalidStatement}\" is disabled, " +
+                        "since it produces side effects that are not accessible from within the model."
+            )
+        }
+
         if (isAtEnd) return CallExpr(id, emptyList(), idToken)
 
         val curr = peek()
@@ -247,6 +296,7 @@ sealed interface ExprResult {
     data class Number(val value: Float) : ExprResult
 
     val number get() = (this as? Number)?.value ?: error("Expression $this does not yield a number!")
+    val boolean get() = number.asCoachBoolean
 
     companion object {
         operator fun invoke(value: Float?) = if (value == null) None else Number(value)
@@ -273,7 +323,7 @@ data class UnaryMinusExpr(val on: Expr) : Expr {
 
 data class NotExpr(val on: Expr) : Expr {
     override fun eval(interpreter: Interpreter) =
-        ExprResult.Number((!on.eval(interpreter).number.asCoachBoolean).asCoach)
+        ExprResult.Number((!on.eval(interpreter).boolean).asCoach)
 }
 
 data class AssignmentExpr(val left: Identifier, val right: Expr) : Expr {
@@ -299,7 +349,28 @@ data class LiteralExpr(val value: Float) : Expr {
 
 data class ConditionalExpr(val condition: Expr, val whenTrue: List<Expr>, val whenFalse: List<Expr>?) : Expr {
     override fun eval(interpreter: Interpreter): ExprResult {
-        (if (condition.eval(interpreter).number.asCoachBoolean) whenTrue else whenFalse)?.eval(interpreter)
+        (if (condition.eval(interpreter).boolean) whenTrue else whenFalse)?.eval(interpreter)
+        return ExprResult.None
+    }
+}
+
+data class RepeatingExpr(val body: List<Expr>, val repetitions: Expr) : Expr {
+    override fun eval(interpreter: Interpreter): ExprResult {
+        repeat(ceil(repetitions.eval(interpreter).number).toInt()) { body.eval(interpreter) }
+        return ExprResult.None
+    }
+}
+
+data class WhileExpr(val condition: Expr, val body: List<Expr>) : Expr {
+    override fun eval(interpreter: Interpreter): ExprResult {
+        while (condition.eval(interpreter).boolean) body.eval(interpreter)
+        return ExprResult.None
+    }
+}
+
+data class RepeatUntilExpr(val condition: Expr, val body: List<Expr>) : Expr {
+    override fun eval(interpreter: Interpreter): ExprResult {
+        do body.eval(interpreter) while (!condition.eval(interpreter).boolean)
         return ExprResult.None
     }
 }
@@ -319,6 +390,12 @@ fun Expr.extractVariables(language: Language = DutchLanguage): Set<String> = whe
     is CallExpr -> arguments.extractVariables(language)
     is ConditionalExpr -> condition.extractVariables(language) + whenTrue.extractVariables(language) +
             (whenFalse?.extractVariables(language) ?: emptySet())
+
     is IdentifierExpr -> setOf(value.value)
+    is NotExpr -> on.extractVariables(language)
+    is RepeatUntilExpr -> body.extractVariables(language) + condition.extractVariables(language)
+    is RepeatingExpr -> body.extractVariables(language) + repetitions.extractVariables(language)
+    is UnaryMinusExpr -> on.extractVariables(language)
+    is WhileExpr -> condition.extractVariables(language) + body.extractVariables(language)
     else -> emptySet()
 }

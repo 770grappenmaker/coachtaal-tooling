@@ -50,7 +50,9 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
         when {
             c.isDigit() -> {
                 val firstPart = takeDigits()
-                val fullNumber = if (match(',') && matchDigit()) "$firstPart.${takeDigits()}" else firstPart
+                val fullNumber =
+                    if ((match(',') || match('.')) && matchDigit())"$firstPart.${takeDigits()}" else firstPart
+
                 val withExponent = if ((match('e') || match('E')) && matchDigit()) "${fullNumber}e${takeDigits()}"
                 else fullNumber
 

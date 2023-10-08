@@ -4,6 +4,8 @@ import com.grappenmaker.jvmutil.*
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes.*
+import kotlin.math.ceil
+import kotlin.reflect.full.memberProperties
 
 inline fun <reified T : CompiledModel> createCompiledModel(
     compiledName: String,
@@ -248,11 +250,63 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
             language.off -> loadConstant(0.0f)
             else -> reference(expr.value, thisName)
         }
+
         is LiteralExpr -> loadConstant(expr.value)
         is NotExpr -> convertBoolean(IFEQ)
         is UnaryMinusExpr -> {
             compile(expr.on, thisName, language)
             visitInsn(FNEG)
+        }
+
+        is WhileExpr -> {
+            val start = Label()
+            val end = Label()
+
+            visitLabel(start)
+            compile(expr.condition, thisName, language)
+            loadConstant(0f)
+            visitInsn(FCMPG)
+            visitJumpInsn(IFLE, end)
+
+            compile(expr.body, thisName, language)
+            visitJumpInsn(GOTO, start)
+
+            visitLabel(end)
+        }
+        is RepeatUntilExpr -> {
+            val loop = Label().also { visitLabel(it) }
+            compile(expr.body, thisName, language)
+
+            compile(expr.condition, thisName, language)
+            loadConstant(0f)
+            visitInsn(FCMPG)
+            visitJumpInsn(IFLE, loop)
+        }
+        is RepeatingExpr -> {
+            val rep = expr.repetitions
+            if (rep is LiteralExpr && rep.value <= 0.0f) return
+
+            loadConstant(0)
+            store(1, ISTORE)
+
+            val start = Label().also { visitLabel(it) }
+            compile(expr.body, thisName, language)
+
+            visitIincInsn(1, 1)
+            load(1, ILOAD)
+
+            when (rep) {
+                is LiteralExpr -> {
+                    loadConstant(ceil(rep.value).toInt())
+                    visitJumpInsn(IF_ICMPLT, start)
+                }
+                else -> {
+                    visitInsn(I2F)
+                    compile(rep, thisName, language)
+                    visitInsn(FCMPG)
+                    visitJumpInsn(IFLT, start)
+                }
+            }
         }
     }
 }

@@ -6,8 +6,8 @@ import kotlin.random.Random
 data class LogbookEntry(val variable: String, val value: Float, val iteration: Int)
 
 class Interpreter(
-    private val iteration: List<Expr>,
-    initial: List<Expr> = emptyList(),
+    private val iteration: ParsedProgram,
+    initial: ParsedProgram,
     language: Language = DutchLanguage,
     private val maxIterations: Int = -1,
     private val logVariables: Set<String> = emptySet()
@@ -66,14 +66,14 @@ class Interpreter(
     }
 
     init {
-        initial.run()
+        initial.lines.run()
         updateLogbook()
     }
 
     fun iterate() {
         if (stopped) return
 
-        iteration.run()
+        iteration.lines.run()
         if (++iterations >= maxIterations && maxIterations != -1) stopped = true
 
         if (!stopped) updateLogbook()
