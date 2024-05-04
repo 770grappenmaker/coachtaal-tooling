@@ -160,3 +160,9 @@ object EnglishLanguage : Language {
 
 fun Identifier.translate(from: Language, to: Language) =
     from.inverseLookup[value.lowercase()]?.let { to.lookup[it] }?.let(::Identifier) ?: this
+
+fun Language.createConstants() = mapOf(
+    on to 255f,
+    off to 0f,
+    pi to Math.PI.toFloat()
+)

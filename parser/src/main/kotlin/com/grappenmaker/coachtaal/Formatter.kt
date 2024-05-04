@@ -1,5 +1,6 @@
 package com.grappenmaker.coachtaal
 
+fun ParsedProgram.asText() = lines.asText(language)
 fun List<Expr>.asText(language: Language) = joinToString("\n") { it.asText(language) }
 fun List<Expr>.asBlock(language: Language) = asText(language).indent()
 private fun String.indent() = lines().joinToString { "  $it" }

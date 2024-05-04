@@ -380,6 +380,7 @@ data class ParsedProgram(val lines: List<Expr>, val language: Language)
 fun ParsedProgram.eval(interpreter: Interpreter) = lines.eval(interpreter)
 fun List<Expr>.eval(interpreter: Interpreter) = forEach { it.eval(interpreter) }
 
+fun ParsedProgram.extractVariables() = lines.extractVariables(language)
 fun List<Expr>.extractVariables(language: Language = DutchLanguage): Set<String> =
     flatMapTo(hashSetOf()) { it.extractVariables(language) }
         .filterTo(hashSetOf()) { it.lowercase() !in language.allBuiltins }

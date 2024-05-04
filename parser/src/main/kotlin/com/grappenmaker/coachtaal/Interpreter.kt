@@ -7,19 +7,11 @@ data class LogbookEntry(val variable: String, val value: Float, val iteration: I
 
 class Interpreter(
     private val iteration: ParsedProgram,
-    initial: ParsedProgram,
-    language: Language = DutchLanguage,
+    private val initial: ParsedProgram,
+    language: Language = iteration.language,
     private val maxIterations: Int = -1,
-    private val logVariables: Set<String> = emptySet()
-) {
-    private val coachConstants = with(language) {
-        mapOf(
-            on to 255f,
-            off to 0f,
-            pi to Math.PI.toFloat()
-        )
-    }
-
+): ModelRunner {
+    private val coachConstants = language.createConstants()
     private data class BuiltinData(val args: Int, val eval: (List<Float>) -> Float?)
 
     private val coachBuiltins: Map<String, BuiltinData> = with(language) {
@@ -53,11 +45,10 @@ class Interpreter(
     var iterations = 0
         private set
 
-    var stopped = false
+    override var stopped = false
         private set
 
     val memory = mutableMapOf<String, Float>()
-    val logbook = mutableListOf<List<LogbookEntry>>()
 
     fun call(name: String, args: List<Float>): Float? {
         val entry = coachBuiltins[name.lowercase()] ?: TODO("Calling $name")
@@ -66,21 +57,14 @@ class Interpreter(
     }
 
     init {
-        initial.lines.run()
-        updateLogbook()
+        reset()
     }
 
-    fun iterate() {
+    override fun iteration() {
         if (stopped) return
 
         iteration.lines.run()
         if (++iterations >= maxIterations && maxIterations != -1) stopped = true
-
-        if (!stopped) updateLogbook()
-    }
-
-    private fun updateLogbook() {
-        if (logVariables.isNotEmpty()) logbook += logVariables.map { LogbookEntry(it, this[it], iterations) }
     }
 
     private fun List<Expr>.run() {
@@ -91,7 +75,7 @@ class Interpreter(
     }
 
     fun run() {
-        while (!stopped) iterate()
+        while (!stopped) iteration()
     }
 
     operator fun get(name: String): Float {
@@ -109,4 +93,39 @@ class Interpreter(
     fun stop() {
         stopped = true
     }
+
+    override fun memoryByName(name: String) = get(name)
+
+    override fun reset() {
+        memory.clear()
+        stopped = false
+        iterations = 0
+        initial.lines.run()
+    }
+}
+
+interface SelfIteratingModelRunner : ModelRunner {
+    val iterations: Int
+}
+
+interface ModelRunner {
+    val stopped: Boolean
+    fun iteration()
+    fun memoryByName(name: String): Float
+    fun reset()
+}
+
+fun ModelRunner.run(logVariables: Set<String> = emptySet()): List<List<LogbookEntry>> {
+    var iter = 0
+    val result = mutableListOf<List<LogbookEntry>>()
+
+    while (!stopped) {
+        iteration()
+
+        val actualIter = if (this is SelfIteratingModelRunner) iterations else iter
+        if (logVariables.isNotEmpty()) result += logVariables.map { LogbookEntry(it, memoryByName(it), actualIter) }
+        iter++
+    }
+
+    return result
 }

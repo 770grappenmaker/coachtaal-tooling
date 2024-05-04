@@ -4,17 +4,21 @@ import com.grappenmaker.jvmutil.*
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes.*
+import org.objectweb.asm.Type
+import java.io.PrintStream
 import kotlin.math.ceil
-import kotlin.reflect.full.memberProperties
 
-inline fun <reified T : CompiledModel> createCompiledModel(
+inline fun <reified T : ModelRunner> createCompiledModel(
     compiledName: String,
     iter: List<Expr>,
     init: List<Expr>,
     language: Language = DutchLanguage,
-) = loadCompiledModel<T>(compiledName, compileModel(compiledName, iter, init, language, listOf(internalNameOf<T>())))
+) = loadCompiledModel<T>(
+    compiledName.replace('/', '.'),
+    compileModel(compiledName, iter, init, language, listOf(internalNameOf<T>()))
+)
 
-inline fun <reified T : CompiledModel> loadCompiledModel(name: String, bytes: ByteArray): T {
+inline fun <reified T : ModelRunner> loadCompiledModel(name: String, bytes: ByteArray): T {
     val loader = object : ClassLoader() {
         fun createClass(name: String, bytes: ByteArray) =
             defineClass(name, bytes, 0, bytes.size)
@@ -29,9 +33,11 @@ fun compileModel(
     init: List<Expr>,
     language: Language = DutchLanguage,
     implements: List<String> = emptyList(),
+    runnable: Boolean = false,
 ) = generateClassBytes(
     name = compiledName,
-    implements = (listOf(internalNameOf<CompiledModel>()) + implements).distinct(),
+    // or emptylist but extra allocation grr :upside_down:
+    implements = (if (runnable) implements else listOf(internalNameOf<ModelRunner>()) + implements).distinct(),
     defaultConstructor = false
 ) {
     val variables = iter.extractVariables(language) + init.extractVariables(language)
@@ -94,6 +100,71 @@ fun compileModel(
         visitLabel(label)
         returnMethod()
     }
+
+    generateMethod("reset", "()V") {
+        loadThis()
+        loadConstant(false)
+        visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
+
+        compile(init, compiledName, language)
+        returnMethod()
+    }
+
+    generateMethod("main", "([Ljava/lang/String;)V", access = ACC_PUBLIC or ACC_STATIC) {
+        load(0)
+        loadConstant(0)
+        visitInsn(AALOAD)
+        visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "parseInt", "(Ljava/lang/String;)I", false)
+        dup()
+        store(4, ISTORE)
+        store(5, ISTORE)
+
+        construct(compiledName, "()V")
+        store(1)
+
+        invokeMethod(System::currentTimeMillis)
+        store(2, LSTORE)
+
+        val repeat = Label().also { visitLabel(it) }
+        visitIincInsn(4, -1)
+        load(1)
+        visitMethodInsn(INVOKEVIRTUAL, compiledName, "reset", "()V", false)
+
+        // <single iteration>
+        val label = Label().also { visitLabel(it) }
+        val end = Label()
+
+        load(1)
+        visitFieldInsn(GETFIELD, compiledName, "_stopped", "Z")
+        visitJumpInsn(IFNE, end)
+
+        load(1)
+        visitMethodInsn(INVOKEVIRTUAL, compiledName, "iteration", "()V", false)
+
+        visitJumpInsn(GOTO, label)
+        visitLabel(end)
+        // </single iteration>
+
+        load(4, ILOAD)
+        visitJumpInsn(IFGT, repeat)
+
+        invokeMethod(System::currentTimeMillis)
+        load(2, LLOAD)
+        visitInsn(LSUB)
+        store(2, LSTORE)
+
+        getField(System::out)
+        concat {
+            appendString("Took ")
+            appendPrimitive(Type.LONG_TYPE) { load(2, LLOAD) }
+            appendString("ms for ")
+            appendPrimitive(Type.INT_TYPE) { load(5, ILOAD) }
+            appendString(" iterations.")
+        }
+
+        invokeMethod(PrintStream::class.java.getMethod("println", String::class.java))
+        returnMethod()
+    }
 }
 
 private fun MethodVisitor.compile(program: List<Expr>, thisName: String, language: Language) =
@@ -124,6 +195,50 @@ private fun MethodVisitor.convertBoolean(opcode: Int, compareWithZero: Boolean =
     visitLabel(label)
     loadConstant(255f)
     visitLabel(end)
+}
+
+fun MethodVisitor.compileConditionDefault(
+    condition: Expr,
+    thisName: String,
+    language: Language,
+    label: Label,
+) {
+    compile(condition, thisName, language)
+    loadConstant(0f)
+    visitInsn(FCMPG)
+    visitJumpInsn(IFLE, label)
+}
+
+fun MethodVisitor.compileConditionOptimized(
+    condition: BinaryOperatorExpr,
+    thisName: String,
+    language: Language,
+    opcode: Int,
+    label: Label,
+) {
+    compile(condition.left, thisName, language)
+    compile(condition.right, thisName, language)
+    visitInsn(FCMPG)
+    visitJumpInsn(opcode, label)
+}
+
+fun MethodVisitor.compileCondition(
+    condition: Expr,
+    thisName: String,
+    language: Language,
+    label: Label
+) = when (condition) {
+    is BinaryOperatorExpr -> when (condition.operatorToken) {
+        "<=" -> compileConditionOptimized(condition, thisName, language, IFGT, label)
+        ">=" -> compileConditionOptimized(condition, thisName, language, IFLT, label)
+        ">" -> compileConditionOptimized(condition, thisName, language, IFLE, label)
+        "<" -> compileConditionOptimized(condition, thisName, language, IFGE, label)
+        "=" -> compileConditionOptimized(condition, thisName, language, IFNE, label)
+        "<>" -> compileConditionOptimized(condition, thisName, language, IFEQ, label)
+        else -> compileConditionDefault(condition, thisName, language, label)
+    }
+
+    else -> compileConditionDefault(condition, thisName, language, label)
 }
 
 private fun MethodVisitor.comparisonOperator(opcode: Int) = convertBoolean(opcode, false)
@@ -230,16 +345,12 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
             val case = Label()
             val end = Label()
 
-            compile(expr.condition, thisName, language)
-            loadConstant(0f)
-            visitInsn(FCMPG)
-            visitJumpInsn(IFGT, case)
-
-            expr.whenFalse?.let { compile(it, thisName, language) }
+            compileCondition(expr.condition, thisName, language, case)
+            compile(expr.whenTrue, thisName, language)
             visitJumpInsn(GOTO, end)
 
             visitLabel(case)
-            compile(expr.whenTrue, thisName, language)
+            expr.whenFalse?.let { compile(it, thisName, language) }
 
             visitLabel(end)
         }
@@ -263,10 +374,7 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
             val end = Label()
 
             visitLabel(start)
-            compile(expr.condition, thisName, language)
-            loadConstant(0f)
-            visitInsn(FCMPG)
-            visitJumpInsn(IFLE, end)
+            compileCondition(expr.condition, thisName, language, end)
 
             compile(expr.body, thisName, language)
             visitJumpInsn(GOTO, start)
@@ -277,10 +385,7 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
             val loop = Label().also { visitLabel(it) }
             compile(expr.body, thisName, language)
 
-            compile(expr.condition, thisName, language)
-            loadConstant(0f)
-            visitInsn(FCMPG)
-            visitJumpInsn(IFLE, loop)
+            compileCondition(expr.condition, thisName, language, loop)
         }
         is RepeatingExpr -> {
             val rep = expr.repetitions
@@ -309,23 +414,4 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
             }
         }
     }
-}
-
-interface CompiledModel {
-    val stopped: Boolean
-    fun iteration()
-    fun memoryByName(name: String): Float
-}
-
-fun CompiledModel.run(logVariables: Set<String> = emptySet()): List<List<LogbookEntry>> {
-    var iter = 0
-    val result = mutableListOf<List<LogbookEntry>>()
-
-    while (!stopped) {
-        iteration()
-        if (logVariables.isNotEmpty()) result += logVariables.map { LogbookEntry(it, memoryByName(it), iter) }
-        iter++
-    }
-
-    return result
 }
