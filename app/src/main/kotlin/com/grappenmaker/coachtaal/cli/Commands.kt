@@ -52,15 +52,25 @@ object Compile : Command() {
 
     override fun invoke(args: List<String>) {
         val actualLanguage = language[args].underlying
+
+        val t0 = System.currentTimeMillis()
         val program = parseProgram(Path(program[args]).readText(), actualLanguage)
         val initial = parseProgram(Path(initial[args]).readText(), actualLanguage)
-        val (popt, iopt) = program.optimizeWithInit(initial)
+        val t1 = System.currentTimeMillis()
+        println("Took ${t1 - t0}ms for parsing + IO")
+
+//        val (popt, iopt) = program.optimizeWithInit(initial)
+        val (popt, iopt) = program to initial
+        val t2 = System.currentTimeMillis()
+        println("Took ${t2 - t1}ms for optimization + IO")
 
         val outPath = Path(output[args])
         outPath.createParentDirectories()
 
         val compiledName = outPath.joinToString("/").removeSuffix(".class")
         val bytes = compileModel(compiledName, popt.lines, iopt.lines, actualLanguage, runnable = true)
+        val t3 = System.currentTimeMillis()
+        println("Took ${t3 - t2}ms for compilation + IO")
         outPath.writeBytes(bytes)
     }
 }
