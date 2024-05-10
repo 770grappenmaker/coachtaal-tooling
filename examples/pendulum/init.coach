@@ -1,0 +1,9 @@
+theta := 30 * pi / 180
+dtheta := 0
+ddtheta := 0
+g := 9.81
+l := 3
+mu := -0.3
+t := 0
+dt := 0.001
+k := -g / l

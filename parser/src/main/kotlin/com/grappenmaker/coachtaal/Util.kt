@@ -8,7 +8,7 @@ val validSymbols = setOf('£', '_', '&', '~', '!', '|', '{', '}', '[', ']')
 @JvmInline
 value class Identifier(val value: String) : TokenInfo {
     init {
-        require(value.isValidIdentifier()) { "Invalid identifier \"$value\"!" }
+        check(value.isValidIdentifier()) { "Invalid identifier \"$value\"!" }
     }
 }
 

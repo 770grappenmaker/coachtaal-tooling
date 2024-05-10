@@ -35,6 +35,5 @@ class EnumParameter<T : Enum<T>>(
     override val usage: String,
     private val impl: (String) -> T,
 ) : Parameter<T> {
-    override val optional = true
     override fun get(on: List<String>) = impl(on[index])
 }

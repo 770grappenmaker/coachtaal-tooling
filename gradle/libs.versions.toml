@@ -1,0 +1,21 @@
+[versions]
+kotlin = "2.0.0-RC2"
+gdx = "1.11.0"
+ktx = "1.11.0-rc3"
+
+[libraries]
+kotlin-jvm = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-serialization = { module = "org.jetbrains.kotlin:kotlin-serialization", version.ref = "kotlin" }
+
+gdx-core = { module = "com.badlogicgames.gdx:gdx", version.ref = "gdx" }
+gdx-platform = { module = "com.badlogicgames.gdx:gdx-platform", version.ref = "gdx" }
+gdx-backend = { module = "com.badlogicgames.gdx:gdx-backend-lwjgl3", version.ref = "gdx" }
+ktx-app = { module = "io.github.libktx:ktx-app", version.ref = "ktx" }
+ktx-assets = { module = "io.github.libktx:ktx-assets", version.ref = "ktx" }
+ktx-collections = { module = "io.github.libktx:ktx-collections", version.ref = "ktx" }
+ktx-graphics = { module = "io.github.libktx:ktx-graphics", version.ref = "ktx" }
+
+
+[bundles]
+kotlin = ["kotlin-jvm", "kotlin-serialization"]
+dx = ["gdx-core", "gdx-backend", "ktx-app", "ktx-assets", "ktx-collections", "ktx-graphics"]

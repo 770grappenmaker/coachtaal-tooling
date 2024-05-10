@@ -46,13 +46,11 @@ class Interpreter(
         private set
 
     override var stopped = false
-        private set
-
     val memory = mutableMapOf<String, Float>()
 
     fun call(name: String, args: List<Float>): Float? {
         val entry = coachBuiltins[name.lowercase()] ?: TODO("Calling $name")
-        require(entry.args == args.size || entry.args < 0) { "$name: Expected ${entry.args} args, got ${args.size}" }
+        check(entry.args == args.size || entry.args < 0) { "$name: Expected ${entry.args} args, got ${args.size}" }
         return entry.eval(args)
     }
 

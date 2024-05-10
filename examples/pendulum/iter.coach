@@ -2,7 +2,7 @@ ddtheta := k * sin(theta) + mu * dtheta
 dtheta := dtheta + ddtheta * dt
 theta := theta + dtheta * dt
 
-if t > 10.0 then
+if t > 10 then
   stop
 endif
 

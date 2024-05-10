@@ -1,12 +1,57 @@
 package com.grappenmaker.coachtaal
 
 import com.grappenmaker.jvmutil.*
-import org.objectweb.asm.Label
-import org.objectweb.asm.MethodVisitor
+import org.objectweb.asm.*
 import org.objectweb.asm.Opcodes.*
-import org.objectweb.asm.Type
+import org.objectweb.asm.tree.*
 import java.io.PrintStream
 import kotlin.math.ceil
+import kotlin.system.measureTimeMillis
+
+inline fun buildInsnList(block: MethodVisitor.() -> Unit): InsnList {
+    val target = InsnList()
+    val visitor = InsnListVisitor(target)
+    block(visitor)
+    return target
+}
+
+class InsnListVisitor(private val output: InsnList) : MethodVisitor(ASM9) {
+    override fun visitInsn(opcode: Int) = output.add(InsnNode(opcode))
+    override fun visitIntInsn(opcode: Int, operand: Int) = output.add(IntInsnNode(opcode, operand))
+    override fun visitVarInsn(opcode: Int, varIndex: Int) = output.add(VarInsnNode(opcode, varIndex))
+    override fun visitTypeInsn(opcode: Int, type: String?) = output.add(TypeInsnNode(opcode, type))
+    override fun visitFieldInsn(opcode: Int, owner: String?, name: String?, descriptor: String?) =
+        output.add(FieldInsnNode(opcode, owner, name, descriptor))
+
+    override fun visitMethodInsn(
+        opcode: Int,
+        owner: String?,
+        name: String?,
+        descriptor: String?,
+        isInterface: Boolean
+    ) = output.add(MethodInsnNode(opcode, owner, name, descriptor, isInterface))
+
+    override fun visitInvokeDynamicInsn(
+        name: String?,
+        descriptor: String?,
+        bootstrapMethodHandle: Handle?,
+        vararg bootstrapMethodArguments: Any?
+    ) = output.add(InvokeDynamicInsnNode(name, descriptor, bootstrapMethodHandle, *bootstrapMethodArguments))
+
+    private fun Label.node() = info as? LabelNode ?: LabelNode(this).also { info = it }
+    override fun visitJumpInsn(opcode: Int, label: Label) = output.add(JumpInsnNode(opcode, label.node()))
+    override fun visitLabel(label: Label) = output.add(label.node())
+    override fun visitLdcInsn(value: Any?) = output.add(LdcInsnNode(value))
+    override fun visitIincInsn(varIndex: Int, increment: Int) = output.add(IincInsnNode(varIndex, increment))
+    override fun visitTableSwitchInsn(min: Int, max: Int, dflt: Label, vararg labels: Label) =
+        output.add(TableSwitchInsnNode(min, max, dflt.node(), *labels.map { it.node() }.toTypedArray()))
+
+    override fun visitLookupSwitchInsn(dflt: Label, keys: IntArray?, labels: Array<Label>) =
+        output.add(LookupSwitchInsnNode(dflt.node(), keys, labels.map { it.node() }.toTypedArray()))
+
+    override fun visitMultiANewArrayInsn(descriptor: String?, numDimensions: Int) =
+        output.add(MultiANewArrayInsnNode(descriptor, numDimensions))
+}
 
 inline fun <reified T : ModelRunner> createCompiledModel(
     compiledName: String,
@@ -24,7 +69,30 @@ inline fun <reified T : ModelRunner> loadCompiledModel(name: String, bytes: Byte
             defineClass(name, bytes, 0, bytes.size)
     }
 
-    return loader.createClass(name, bytes).getConstructor().newInstance() as T
+    return loader.createClass(name, addModelType<T>(bytes)).getConstructor().newInstance() as T
+}
+
+inline fun <reified T : ModelRunner> addModelType(bytes: ByteArray): ByteArray {
+    val reader = ClassReader(bytes)
+    val internal = internalNameOf<T>()
+    if (internal in reader.interfaces) return bytes
+
+    val writer = ClassWriter(reader, 0)
+
+    reader.accept(object : ClassVisitor(ASM9, writer) {
+        override fun visit(
+            version: Int,
+            access: Int,
+            name: String,
+            signature: String?,
+            superName: String?,
+            interfaces: Array<String>?
+        ) {
+            super.visit(version, access, name, signature, superName, (interfaces ?: emptyArray()) + internal)
+        }
+    }, 0)
+
+    return writer.toByteArray()
 }
 
 fun compileModel(
@@ -53,15 +121,15 @@ fun compileModel(
     generateMethod("memoryByName", "(Ljava/lang/String;)F") {
         loadThis()
         load(1)
-        invokeMethod(Object::hashCode)
+        visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", "hashCode", "()I", false)
 
         val end = Label()
         val default = Label()
-        val sorted = variables.sortedBy { it.hashCode() }
+        val sorted = variables.map { it to it.hashCode() }.sortedBy { (_, a) -> a }
         val labels = sorted.map { Label() }
 
-        visitLookupSwitchInsn(default, sorted.map { it.hashCode() }.toIntArray(), labels.toTypedArray())
-        sorted.forEachIndexed { idx, v ->
+        visitLookupSwitchInsn(default, sorted.map { (_, a) -> a }.toIntArray(), labels.toTypedArray())
+        sorted.forEachIndexed { idx, (v) ->
             visitLabel(labels[idx])
             visitFieldInsn(GETFIELD, compiledName, v, "F")
             visitJumpInsn(GOTO, end)
@@ -81,11 +149,13 @@ fun compileModel(
         returnMethod(IRETURN)
     }
 
+    val compiledInit = buildInsnList { compile(init, compiledName, language) }
+
     generateMethod("<init>", "()V") {
         loadThis()
         visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
 
-        compile(init, compiledName, language)
+        compiledInit.accept(this)
         returnMethod()
     }
 
@@ -106,7 +176,7 @@ fun compileModel(
         loadConstant(false)
         visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
 
-        compile(init, compiledName, language)
+        compiledInit.accept(this)
         returnMethod()
     }
 
@@ -122,7 +192,7 @@ fun compileModel(
         construct(compiledName, "()V")
         store(1)
 
-        invokeMethod(System::currentTimeMillis)
+        visitMethodInsn(INVOKESTATIC, "java/lang/System", "currentTimeMillis", "()J", false)
         store(2, LSTORE)
 
         val repeat = Label().also { visitLabel(it) }
@@ -148,12 +218,12 @@ fun compileModel(
         load(4, ILOAD)
         visitJumpInsn(IFGT, repeat)
 
-        invokeMethod(System::currentTimeMillis)
+        visitMethodInsn(INVOKESTATIC, "java/lang/System", "currentTimeMillis", "()J", false)
         load(2, LLOAD)
         visitInsn(LSUB)
         store(2, LSTORE)
 
-        getField(System::out)
+        visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;")
         concat {
             appendString("Took ")
             appendPrimitive(Type.LONG_TYPE) { load(2, LLOAD) }
@@ -162,13 +232,32 @@ fun compileModel(
             appendString(" iterations.")
         }
 
-        invokeMethod(PrintStream::class.java.getMethod("println", String::class.java))
+        visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false)
         returnMethod()
     }
 }
 
-private fun MethodVisitor.compile(program: List<Expr>, thisName: String, language: Language) =
-    program.forEach { compile(it, thisName, language) }
+private fun Expr.remainingStackHeight(language: Language) = when (this) {
+    is CallExpr -> if (name.value == language.stop) 0 else 1
+    is BinaryOperatorExpr, is IdentifierExpr, is LiteralExpr, is NotExpr, is UnaryMinusExpr -> 1
+    // body gets ironed out anyway, should be 0
+    is AssignmentExpr, is ConditionalExpr, is RepeatUntilExpr, is RepeatingExpr, is WhileExpr -> 0
+}
+
+private fun MethodVisitor.popRemaining(expr: Expr, language: Language) {
+    val pops = expr.remainingStackHeight(language)
+    if (pops > 0) pop(pops)
+}
+
+private fun MethodVisitor.compile(
+    program: List<Expr>,
+    thisName: String,
+    language: Language,
+    topLevel: Boolean = true
+) = program.forEach {
+    compile(it, thisName, language)
+    if (topLevel) popRemaining(it, language)
+}
 
 private fun MethodVisitor.reference(id: Identifier, thisName: String) {
     loadThis()
@@ -277,7 +366,7 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
         }
 
         is CallExpr -> {
-            compile(expr.arguments, thisName, language)
+            compile(expr.arguments, thisName, language, false)
 
             when (val name = expr.name.value) {
                 !in language.allBuiltins -> error("$name is not supported")
@@ -309,7 +398,7 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
                 }
 
                 language.random -> {
-                    invokeMethod(Math::random)
+                    visitMethodInsn(INVOKESTATIC, "java/lang/Math", "random", "()D", false)
                     visitInsn(D2F)
                 }
 
@@ -381,12 +470,14 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
 
             visitLabel(end)
         }
+
         is RepeatUntilExpr -> {
             val loop = Label().also { visitLabel(it) }
             compile(expr.body, thisName, language)
 
             compileCondition(expr.condition, thisName, language, loop)
         }
+
         is RepeatingExpr -> {
             val rep = expr.repetitions
             if (rep is LiteralExpr && rep.value <= 0.0f) return
@@ -405,6 +496,7 @@ private fun MethodVisitor.compile(expr: Expr, thisName: String, language: Langua
                     loadConstant(ceil(rep.value).toInt())
                     visitJumpInsn(IF_ICMPLT, start)
                 }
+
                 else -> {
                     visitInsn(I2F)
                     compile(rep, thisName, language)

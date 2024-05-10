@@ -3,7 +3,10 @@ package com.grappenmaker.coachtaal
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.Input
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
+import com.badlogic.gdx.files.FileHandle
 import com.badlogic.gdx.graphics.OrthographicCamera
+import com.badlogic.gdx.graphics.Pixmap
+import com.badlogic.gdx.graphics.PixmapIO
 import com.badlogic.gdx.graphics.g2d.BitmapFont
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer
@@ -12,14 +15,20 @@ import ktx.app.KtxGame
 import ktx.app.KtxScreen
 import ktx.graphics.center
 import ktx.graphics.use
+import java.nio.file.Path
+import java.util.zip.Deflater
 import kotlin.math.absoluteValue
+import kotlin.math.log
+import kotlin.math.min
+import kotlin.math.pow
 
 fun List<List<LogbookEntry>>.visualize(
     xVariable: String,
     yVariable: String,
     lineThickness: Float = 0f,
     margin: Float = 10f,
-) = Lwjgl3Application(VisualizerApp(this, xVariable, yVariable, lineThickness, margin))
+    screenshotOutput: Path? = null,
+) = Lwjgl3Application(VisualizerApp(this, xVariable, yVariable, lineThickness, margin, screenshotOutput))
 
 class VisualizerApp(
     private val logbook: List<List<LogbookEntry>>,
@@ -27,9 +36,14 @@ class VisualizerApp(
     private val yVariable: String,
     private val lineThickness: Float = 0f,
     private val margin: Float = 10f,
+    private val screenshotOutput: Path? = null,
 ) : KtxGame<KtxScreen>() {
+    init {
+        if (xVariable == yVariable) error("Cannot visualize a relation between identical variables!")
+    }
+
     override fun create() {
-        addScreen(VisualizerScreen(logbook, xVariable, yVariable, lineThickness, margin))
+        addScreen(VisualizerScreen(logbook, xVariable, yVariable, lineThickness, margin, screenshotOutput))
         setScreen<VisualizerScreen>()
     }
 }
@@ -40,6 +54,7 @@ class VisualizerScreen(
     private val yVariable: String,
     private val lineThickness: Float = 0f,
     private val margin: Float = 10f,
+    private val screenshotOutput: Path? = null,
 ) : KtxScreen {
     private val shapes = ShapeRenderer()
     private val sprites = SpriteBatch()
@@ -72,7 +87,18 @@ class VisualizerScreen(
 
     private var xOffset = 0f
     private var yOffset = 0f
+
+    private val minZoom = .1f
+    private val maxZoom = 3f
+    private val zoomBase = maxZoom / minZoom
+    private var zoomTime = -log(minZoom, zoomBase)
     private var zoom = 1f
+
+    private fun updateZoom(by: Float) {
+        zoomTime += by
+        zoomTime = zoomTime.clamp(0.0f, 1.0f)
+        zoom = minZoom * zoomBase.pow(zoomTime)
+    }
 
     override fun render(delta: Float) {
         if (Gdx.input.isButtonPressed(Input.Buttons.LEFT)) {
@@ -80,9 +106,8 @@ class VisualizerScreen(
             yOffset -= Gdx.input.deltaY
         }
 
-        if (Gdx.input.isKeyPressed(Input.Keys.UP)) zoom -= delta
-        if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) zoom += delta
-        zoom = zoom.clamp(.1f, 3f)
+        if (Gdx.input.isKeyPressed(Input.Keys.UP)) updateZoom(delta)
+        if (Gdx.input.isKeyPressed(Input.Keys.DOWN)) updateZoom(-delta)
 
         cam.update()
 
@@ -175,6 +200,12 @@ class VisualizerScreen(
                 viewport.worldWidth - doubleMargin,
                 (tripleMargin - minY * yScale + yOffset).clamp(tripleMargin, viewport.worldHeight - tripleMargin)
             )
+        }
+
+        if (screenshotOutput != null && Gdx.input.isKeyJustPressed(Input.Keys.S)) {
+            val out = FileHandle(screenshotOutput.resolve("${System.currentTimeMillis()}.png").toFile())
+            val pixmap = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.width, Gdx.graphics.height)
+            PixmapIO.writePNG(out, pixmap, Deflater.DEFAULT_COMPRESSION, true)
         }
     }
 

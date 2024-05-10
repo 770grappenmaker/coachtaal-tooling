@@ -46,6 +46,23 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
             result += createToken(info)
         }
 
+        fun conditionalToken(info: TokenInfo, condition: Boolean, message: String) {
+            val token = createToken(info)
+            if (condition) result += token else {
+                val header = "Illegal character (as $info) while lexing at line ${token.line}, " +
+                        "column ${token.column}, \"${token.lexeme}\": $message"
+
+
+                val targetLine = input.lines()[token.line - 1]
+                val context = "\n\n" + """
+                    $targetLine
+                    ${" ".repeat(token.column - 1)}^ here
+                """.trimIndent()
+
+                error(header + context)
+            }
+        }
+
         val c = input[ptr]
         when {
             c.isDigit() -> {
@@ -87,18 +104,9 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
                     val grouped = result.removeLastN(result.size - start.size)
                     result += Token(GroupToken(grouped), input.slice(start.ptr..ptr), start.line, start.col)
                 }
-                ';' -> {
-                    require(groupStack.isNotEmpty()) { "; outside of parentheses" }
-                    token(ParameterSeparatorToken)
-                }
-                ':' -> {
-                    require(match('=')) { ": without = (assignment operator)" }
-                    token(AssignmentToken)
-                }
-                else -> {
-                    val debugInfo = createToken(InvalidToken)
-                    error("Don't know what to do with \"${debugInfo.lexeme}\" at ${debugInfo.line}:${debugInfo.column}")
-                }
+                ';' -> conditionalToken(ParameterSeparatorToken, groupStack.isNotEmpty(), "; outside of parentheses")
+                ':' -> conditionalToken(AssignmentToken, match('='), ": without = (assignment operator)")
+                else -> conditionalToken(InvalidToken, false, "no such token")
             }
         }
 

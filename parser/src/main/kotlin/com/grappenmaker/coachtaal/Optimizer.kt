@@ -2,7 +2,18 @@ package com.grappenmaker.coachtaal
 
 import kotlin.math.ceil
 
-operator fun <T> Set<T>.rem(other: Set<T>) = (this - other) + (other - this)
+fun ParsedProgram.couldTerminate() = lines.couldTerminate(language)
+fun List<Expr>.couldTerminate(language: Language) = any { it.couldTerminate(language) }
+fun Expr.couldTerminate(language: Language): Boolean = when (this) {
+    is CallExpr -> name.value == language.stop
+    is ConditionalExpr -> whenTrue.couldTerminate(language) || whenFalse?.couldTerminate(language) ?: false
+    is RepeatUntilExpr -> body.couldTerminate(language)
+    is RepeatingExpr -> body.couldTerminate(language)
+    is WhileExpr -> body.couldTerminate(language)
+    else -> false
+}
+
+infix fun <T> Set<T>.xor(other: Set<T>) = (this - other) + (other - this)
 
 data class ConstantNode(
     val identifier: Identifier,
@@ -138,10 +149,18 @@ fun ParsedProgram.optimizeWithInit(init: ParsedProgram): Pair<ParsedProgram, Par
 
     val (initConstants, initAssignments) = init.analyzeVariables()
     val (iterConstants) = analyzeVariables()
-    val bothConstantIds = (initConstants.keys % iterConstants.keys) - initAssignments
+    val bothConstantIds = (initConstants.keys xor iterConstants.keys) - initAssignments
     val bothConstants = (initConstants + iterConstants).filterKeys { it in bothConstantIds }
 
-    return optimizeInternal(bothConstants) to init.optimizeInternal(initConstants)
+    return optimizeInternal(bothConstants).assertTermination() to init.optimizeInternal(initConstants)
+}
+
+fun ParsedProgram.assertTermination(): ParsedProgram {
+    if (!couldTerminate()) error(
+        "Static analysis showed that there is no possible way the iteration program could terminate!"
+    )
+
+    return this
 }
 
 fun ParsedProgram.optimize() = optimizeInternal(analyzeVariables().constants)
@@ -169,6 +188,7 @@ fun Expr.optimize(): List<Expr> = when (this) {
 
         val (c1, t1, f1) = iter
         val c1c = c1.constantOrNull()
+
         when {
             t1.isEmpty() && f1?.isEmpty() != false -> listOf(c1)
             c1c != null -> when {
@@ -232,7 +252,19 @@ fun Expr.optimize(): List<Expr> = when (this) {
                 val (l1, r1) = iter
 
                 val (l1c, r1c) = l1.constantOrNull() to r1.constantOrNull()
-                if (l1c != null && r1c != null) LiteralExpr(operator(l1c, r1c)) else iter
+                val constant = l1c ?: r1c
+
+                when {
+                    l1c != null && r1c != null -> LiteralExpr(operator(l1c, r1c))
+                    else -> if (constant != null) {
+                        val nonConstant = if (constant == l1c) r1 else l1
+                        when (operatorToken) {
+                            "&&" -> if (constant.asCoachBoolean) nonConstant else LiteralExpr(false.asCoach)
+                            "||" -> if (constant.asCoachBoolean) LiteralExpr(true.asCoach) else nonConstant
+                            else -> iter
+                        }
+                    } else iter
+                }
             }
 
             is CallExpr -> copy(arguments = arguments.map { it.optimizeSingle() })

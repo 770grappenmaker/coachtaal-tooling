@@ -1,9 +1,15 @@
 package com.grappenmaker.coachtaal
 
+import java.text.DecimalFormat
+import java.util.Locale
+
 fun ParsedProgram.asText() = lines.asText(language)
 fun List<Expr>.asText(language: Language) = joinToString("\n") { it.asText(language) }
 fun List<Expr>.asBlock(language: Language) = asText(language).indent()
-private fun String.indent() = lines().joinToString { "  $it" }
+private fun String.indent() = lines().joinToString("\n") { "  $it" }
+
+val Language.locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
+fun Language.formatConstant(cst: Float) = DecimalFormat.getNumberInstance(locale).format(cst)
 
 // TODO: translation
 fun Expr.asText(language: Language): String = when (this) {
@@ -25,7 +31,7 @@ fun Expr.asText(language: Language): String = when (this) {
             language.endIfStatement
 
     is IdentifierExpr -> value.value
-    is LiteralExpr -> value.toString()
+    is LiteralExpr -> language.formatConstant(value)
     is NotExpr -> "${language.notOperator} ${on.asText(language)}"
     is RepeatUntilExpr -> "${language.doWhileStatement}\n${body.asBlock(language)}" +
             "\n${language.doWhileUntil} ${condition.asText(language)}"
