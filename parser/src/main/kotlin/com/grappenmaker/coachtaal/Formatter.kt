@@ -1,7 +1,7 @@
 package com.grappenmaker.coachtaal
 
 import java.text.DecimalFormat
-import java.util.Locale
+import java.util.*
 
 fun ParsedProgram.asText() = lines.asText(language)
 fun List<Expr>.asText(language: Language) = joinToString("\n") { it.asText(language) }
@@ -23,7 +23,7 @@ fun Expr.asText(language: Language): String = when (this) {
     } ${right.asText(language)}"
 
     is CallExpr -> name.value +
-            if (arguments.isNotEmpty()) "(${arguments.joinToString { it.asText(language) }})" else ""
+            if (arguments.isNotEmpty()) "(${arguments.joinToString(";") { it.asText(language) }})" else ""
 
     is ConditionalExpr -> "${language.ifStatement} ${condition.asText(language)} ${language.ifThen}" +
             "\n${whenTrue.asBlock(language)}\n" +
@@ -42,4 +42,8 @@ fun Expr.asText(language: Language): String = when (this) {
     is UnaryMinusExpr -> "-${on.asText(language)}"
     is WhileExpr -> "${language.whileStatement} ${condition.asText(language)} ${language.startDo}\n" +
             "${body.asBlock(language)}\n${language.endDo}"
+
+    is FunctionExpr -> "${language.startFunction} ${name.value}" +
+            (if (parameters.isNotEmpty()) "(${parameters.joinToString(";") { it.value }})" else "") +
+            "\n${body.asBlock(language)}\n${language.endFunction}"
 }

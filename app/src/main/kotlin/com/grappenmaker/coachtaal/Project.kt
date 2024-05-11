@@ -113,6 +113,12 @@ fun Project.init() {
     )
 
     configPath.writeText(json.encodeToString(config))
+    dir.resolve(".gitignore").writeText(
+        """
+            build/
+            results/
+        """.trimIndent()
+    )
 }
 
 @Serializable

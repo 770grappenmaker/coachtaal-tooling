@@ -3,20 +3,34 @@ package com.grappenmaker.coachtaal
 import kotlin.math.ceil
 import kotlin.math.pow
 
-fun parseProgram(contents: String, language: Language) =
-    ParsedProgram(Parser(lexer(contents), language, contents).parseFull(), language)
+inline fun <reified V : Any, T> Iterable<T>.partitionIs(): Pair<List<V>, List<T>> {
+    val resA = mutableListOf<V>()
+    val resB = mutableListOf<T>()
+
+    forEach { if (it is V) resA += it else resB += it }
+    return resA to resB
+}
+
+fun parseProgram(contents: String, language: Language): ParsedProgram {
+    val parser = Parser(lexer(contents), language, contents)
+    val (functions, lines) = parser.parseFull().partitionIs<FunctionExpr, _>()
+    parser.validateFunctions(functions)
+    return ParsedProgram(lines, functions, language)
+}
 
 fun parseExpression(
     tokens: List<Token>,
     language: Language,
     originalCode: String? = null,
-) = parseSingle(tokens, language, originalCode) { compare() }
+) = parseSingle(tokens, language, originalCode) { compare().also { it.assertNoFunctions() } }
 
 fun parseBlock(
     tokens: List<Token>,
     language: Language,
     originalCode: String? = null
-) = if (tokens.isEmpty()) emptyList() else parseSingle(tokens, language, originalCode) { parseFull() }
+) = if (tokens.isEmpty()) emptyList() else parseSingle(tokens, language, originalCode) {
+    parseFull().also { it.assertNoFunctions() }
+}
 
 private inline fun <T> parseSingle(
     tokens: List<Token>,
@@ -45,6 +59,7 @@ fun Expr.humanFriendly() = when (this) {
     is RepeatingExpr -> "repeated expression"
     is UnaryMinusExpr -> "unary minus expression"
     is WhileExpr -> "while expression"
+    is FunctionExpr -> "function \"${name.value}\" expression"
 }
 
 class Parser(
@@ -87,7 +102,7 @@ class Parser(
     }
 
     // Returns all next tokens satisfying [cond]
-    private fun takeWhile(skipNewLine: Boolean = true, cond: (TokenInfo) -> Boolean) = generateSequence {
+    private fun takeWhile(skipNewLine: Boolean = false, cond: (TokenInfo) -> Boolean) = generateSequence {
         if (isAtEnd) null else peek(skipNewLine = skipNewLine)
             .takeIf { cond(it.info) }
             ?.also { take(skipNewLine = skipNewLine) }
@@ -179,6 +194,7 @@ class Parser(
         } else null
 
         if (expectElse) take("""expected "${language.endIfStatement}" after "${language.elseStatement}"""")
+
         return ConditionalExpr(
             condition = parseExpression(condition, language, originalCode),
             whenTrue = parseBlock(whenTrue, language, originalCode),
@@ -214,9 +230,35 @@ class Parser(
         return RepeatUntilExpr(compare(), parseBlock(body, language, originalCode))
     }
 
+    private fun function(endName: String): Expr {
+        val nameToken = take("function declaration without name")
+        val name = nameToken.info as? Identifier ?: unexpected(nameToken, "expected an identifier for a function name")
+        if (name.value in language.allBuiltins) error("Illegal function name ${name.value}")
+
+        // Could technically not be CallExpr but we are smarter than the compiler here
+        val arguments = (call(nameToken) as CallExpr).arguments
+        val argumentNames = arguments.filterIsInstance<IdentifierExpr>().map { it.value }
+        if (arguments.size != argumentNames.size)
+            unexpected(nameToken, "Invalid parameter declaration for function ${name.value}")
+
+        val body = takeWhile { it !is Identifier || it.value.lowercase() != endName }
+        take("""no "$endName" in function declaration""")
+
+        return FunctionExpr(name, argumentNames, parseBlock(body, language, originalCode), nameToken)
+    }
+
     private fun call(idToken: Token): Expr {
         val id = idToken.info as? Identifier ?: unexpected(idToken, "expected an identifier in a call")
         when (id.value.lowercase()) {
+            language.startProcedure -> {
+                println(
+                    "Warning: procedures behave like functions in this implementation of Coach. " +
+                        "Use ${language.startFunction} instead of ${language.startProcedure}."
+                )
+
+                return function(language.endProcedure)
+            }
+            language.startFunction -> return function(language.endFunction)
             language.ifStatement -> return ifStatement()
             language.redoStatement -> return redoStatement()
             language.whileStatement -> return whileStatement()
@@ -232,7 +274,7 @@ class Parser(
         val curr = peek()
         val info = curr.info
 
-        if (info is GroupToken) advance()
+        if (info is GroupToken) take()
         val arguments = (info as? GroupToken)?.verify()?.tokens
             ?.split { it.info is ParameterSeparatorToken } ?: emptyList()
 
@@ -316,6 +358,27 @@ class Parser(
 
         error(header + context + hint)
     }
+
+    fun List<Expr>.assertNoFunctions() = forEach { it.assertNoFunctions() }
+    fun Expr.assertNoFunctions(): Unit = when(this) {
+        is ConditionalExpr -> {
+            whenFalse?.assertNoFunctions()
+            whenTrue.assertNoFunctions()
+        }
+
+        is FunctionExpr -> unexpected(debug, "function not allowed in code block")
+        is RepeatUntilExpr -> body.assertNoFunctions()
+        is RepeatingExpr -> body.assertNoFunctions()
+        is WhileExpr -> body.assertNoFunctions()
+        else -> {}
+    }
+
+    fun validateFunctions(functions: List<FunctionExpr>) {
+        functions.groupBy { it.name.value }.values.find { it.size > 1 }?.let { illegalFunctions ->
+            val culprit = illegalFunctions[1]
+            unexpected(culprit.debug, "duplicate function definition with name \"${culprit.name.value}\"")
+        }
+    }
 }
 
 sealed interface ExprResult {
@@ -331,7 +394,7 @@ sealed interface ExprResult {
 }
 
 sealed interface Expr {
-    fun eval(interpreter: Interpreter): ExprResult
+    fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult
 }
 
 data class BinaryOperatorExpr(
@@ -340,91 +403,110 @@ data class BinaryOperatorExpr(
     val operator: (Float, Float) -> Float,
     val operatorToken: String,
 ) : Expr {
-    override fun eval(interpreter: Interpreter) =
-        ExprResult.Number(operator(left.eval(interpreter).number, right.eval(interpreter).number))
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        ExprResult.Number(operator(left.eval(interpreter, scope).number, right.eval(interpreter, scope).number))
 }
 
 data class UnaryMinusExpr(val on: Expr) : Expr {
-    override fun eval(interpreter: Interpreter) = ExprResult.Number(-on.eval(interpreter).number)
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        ExprResult.Number(-on.eval(interpreter, scope).number)
 }
 
 data class NotExpr(val on: Expr) : Expr {
-    override fun eval(interpreter: Interpreter) =
-        ExprResult.Number((!on.eval(interpreter).boolean).asCoach)
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        ExprResult.Number((!on.eval(interpreter, scope).boolean).asCoach)
 }
 
 data class AssignmentExpr(val left: Identifier, val right: Expr) : Expr {
-    override fun eval(interpreter: Interpreter): ExprResult {
-        interpreter[left.value] = right.eval(interpreter).number
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult {
+        val lhs = left.value
+        val rhs = right.eval(interpreter, scope).number
+
+        // coach logic
+        if (lhs in scope) scope[lhs] = rhs else interpreter[lhs] = rhs
+
         return ExprResult.None
     }
 }
 
 data class CallExpr(val name: Identifier, val arguments: List<Expr>, val debug: Token) : Expr {
-    override fun eval(interpreter: Interpreter) =
-        ExprResult(interpreter.call(name.value, arguments.map { it.eval(interpreter).number }))
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        ExprResult(interpreter.call(name.value, arguments.map { it.eval(interpreter, scope).number }))
 }
 
 data class IdentifierExpr(val value: Identifier) : Expr {
-    override fun eval(interpreter: Interpreter) = ExprResult.Number(interpreter[value.value])
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        ExprResult.Number(scope[value.value] ?: interpreter[value.value])
 }
 
 data class LiteralExpr(val value: Float) : Expr {
     private val result = ExprResult.Number(value)
-    override fun eval(interpreter: Interpreter) = result
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) = result
 }
 
 data class ConditionalExpr(val condition: Expr, val whenTrue: List<Expr>, val whenFalse: List<Expr>?) : Expr {
-    override fun eval(interpreter: Interpreter): ExprResult {
-        (if (condition.eval(interpreter).boolean) whenTrue else whenFalse)?.eval(interpreter)
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult {
+        (if (condition.eval(interpreter, scope).boolean) whenTrue else whenFalse)?.eval(interpreter, scope)
         return ExprResult.None
     }
 }
 
 data class RepeatingExpr(val body: List<Expr>, val repetitions: Expr) : Expr {
-    override fun eval(interpreter: Interpreter): ExprResult {
-        repeat(ceil(repetitions.eval(interpreter).number).toInt()) { body.eval(interpreter) }
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult {
+        repeat(ceil(repetitions.eval(interpreter, scope).number).toInt()) { body.eval(interpreter, scope) }
         return ExprResult.None
     }
 }
 
 data class WhileExpr(val condition: Expr, val body: List<Expr>) : Expr {
-    override fun eval(interpreter: Interpreter): ExprResult {
-        while (condition.eval(interpreter).boolean) body.eval(interpreter)
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult {
+        while (condition.eval(interpreter, scope).boolean) body.eval(interpreter, scope)
         return ExprResult.None
     }
 }
 
 data class RepeatUntilExpr(val condition: Expr, val body: List<Expr>) : Expr {
-    override fun eval(interpreter: Interpreter): ExprResult {
-        do body.eval(interpreter) while (!condition.eval(interpreter).boolean)
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>): ExprResult {
+        do body.eval(interpreter, scope) while (!condition.eval(interpreter, scope).boolean)
         return ExprResult.None
     }
 }
 
-data class ParsedProgram(val lines: List<Expr>, val language: Language)
+data class FunctionExpr(
+    val name: Identifier,
+    val parameters: List<Identifier>,
+    val body: List<Expr>,
+    val debug: Token,
+) : Expr {
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+        error("Function expressions should never be evaluated! This is a bug")
+}
 
-fun ParsedProgram.eval(interpreter: Interpreter) = lines.eval(interpreter)
-fun List<Expr>.eval(interpreter: Interpreter) = forEach { it.eval(interpreter) }
+data class ParsedProgram(val lines: List<Expr>, val functions: List<FunctionExpr>, val language: Language)
+
+fun ParsedProgram.eval(interpreter: Interpreter) = lines.eval(interpreter, mutableMapOf())
+
+fun List<Expr>.eval(interpreter: Interpreter, scope: MutableMap<String, Float>) =
+    forEach { it.eval(interpreter, scope) }
 
 fun ParsedProgram.findNonConstant(): Set<Identifier> {
     val analysis = analyzeVariables()
     return analysis.assignments - analysis.constants.keys
 }
 
-fun ParsedProgram.extractVariables() = lines.extractVariables(language)
-fun List<Expr>.extractVariables(language: Language = DutchLanguage): Set<String> =
+fun ParsedProgram.extractVariables() = lines.extractVariables(language) - functions.mapTo(hashSetOf()) { it.name }
+fun List<Expr>.extractVariables(language: Language = DutchLanguage): Set<Identifier> =
     flatMapTo(hashSetOf()) { it.extractVariables(language) }
-        .filterTo(hashSetOf()) { it.lowercase() !in language.allBuiltins }
+        .filterTo(hashSetOf()) { it.value.lowercase() !in language.allBuiltins }
 
-fun Expr.extractVariables(language: Language = DutchLanguage): Set<String> = when (this) {
-    is AssignmentExpr -> setOf(left.value) + right.extractVariables(language)
+fun Expr.extractVariables(language: Language = DutchLanguage): Set<Identifier> = when (this) {
+    is AssignmentExpr -> setOf(left) + right.extractVariables(language)
     is BinaryOperatorExpr -> left.extractVariables(language) + right.extractVariables(language)
     is CallExpr -> arguments.extractVariables(language)
     is ConditionalExpr -> condition.extractVariables(language) + whenTrue.extractVariables(language) +
             (whenFalse?.extractVariables(language) ?: emptySet())
 
-    is IdentifierExpr -> setOf(value.value)
+    is IdentifierExpr -> setOf(value)
     is NotExpr -> on.extractVariables(language)
     is RepeatUntilExpr -> body.extractVariables(language) + condition.extractVariables(language)
     is RepeatingExpr -> body.extractVariables(language) + repetitions.extractVariables(language)

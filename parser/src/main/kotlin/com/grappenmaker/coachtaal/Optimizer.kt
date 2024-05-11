@@ -2,14 +2,47 @@ package com.grappenmaker.coachtaal
 
 import kotlin.math.ceil
 
-fun ParsedProgram.couldTerminate() = lines.couldTerminate(language)
-fun List<Expr>.couldTerminate(language: Language) = any { it.couldTerminate(language) }
-fun Expr.couldTerminate(language: Language): Boolean = when (this) {
-    is CallExpr -> name.value == language.stop
-    is ConditionalExpr -> whenTrue.couldTerminate(language) || whenFalse?.couldTerminate(language) ?: false
-    is RepeatUntilExpr -> body.couldTerminate(language)
-    is RepeatingExpr -> body.couldTerminate(language)
-    is WhileExpr -> body.couldTerminate(language)
+class StopAnalysis(program: ParsedProgram) {
+    val stopCalls = mutableMapOf(program.language.stop to true)
+
+    private val byName = program.functions.associateBy { it.name }
+    fun Identifier.check() = stopCalls.getOrPut(value) { byName[this]?.body?.callsStop() ?: false }
+
+    private fun List<Expr>.callsStop() = any { it.callsStop() }
+    private fun Expr.callsStop(): Boolean = when (this) {
+        is CallExpr -> name.check()
+        is ConditionalExpr -> {
+            whenTrue.callsStop() || whenFalse?.callsStop() ?: false
+        }
+
+        is RepeatUntilExpr -> body.callsStop()
+        is RepeatingExpr -> body.callsStop()
+        is WhileExpr -> body.callsStop()
+        else -> false
+    }
+}
+
+fun ParsedProgram.terminableFunctions(): Set<FunctionExpr> {
+    val target = StopAnalysis(this)
+    return with (target) { functions.filterTo(hashSetOf()) { it.name.check() } }
+}
+
+// not WILL terminate since halting problem xd
+fun ParsedProgram.couldTerminate() = with (StopAnalysis(this)) { lines.couldTerminate() }
+
+context(StopAnalysis)
+fun List<Expr>.couldTerminate() = any { it.couldTerminate() }
+
+context(StopAnalysis)
+fun Expr.couldTerminate(): Boolean = when (this) {
+    is CallExpr -> name.check()
+    is ConditionalExpr -> {
+        whenTrue.couldTerminate() || whenFalse?.couldTerminate() ?: false
+    }
+
+    is RepeatUntilExpr -> body.couldTerminate()
+    is RepeatingExpr -> body.couldTerminate()
+    is WhileExpr -> body.couldTerminate()
     else -> false
 }
 
@@ -94,7 +127,16 @@ fun ParsedProgram.analyzeVariables(): VariablesAnalysis {
         id to ConstantNode(id, v)
     }
 
-    with(target) { lines.analyzeVariables() }
+    with(target) {
+        lines.analyzeVariables()
+        functions.forEach {
+            it.body.analyzeVariables()
+
+            // Pretend a function gets assigned multiple times
+            // (its name is technically not assigned, except in its body)
+            flow(it.name, IdentifierExpr(it.name))
+        }
+    }
 
     val constants = target.possibleConstants.mapValues { it.value.value }
     val assignments = target.possibleConstants.keys + target.notConstant
@@ -281,6 +323,8 @@ fun Expr.optimize(): List<Expr> = when (this) {
             }
 
             is IdentifierExpr -> constants[value]?.let(::LiteralExpr) ?: this
+
+            is FunctionExpr -> copy(body = body.optimize())
 
             else -> this
         }

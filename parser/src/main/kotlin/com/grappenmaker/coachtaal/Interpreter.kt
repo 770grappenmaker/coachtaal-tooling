@@ -12,11 +12,12 @@ class Interpreter(
     private val maxIterations: Int = -1,
 ): ModelRunner {
     private val coachConstants = language.createConstants()
-    private data class BuiltinData(val args: Int, val eval: (List<Float>) -> Float?)
+    private data class InterpretedFunction(val args: Int, val eval: (List<Float>) -> Float?)
 
-    private val coachBuiltins: Map<String, BuiltinData> = with(language) {
+    private val coachBuiltins: Map<String, InterpretedFunction> = with(language) {
         buildMap {
-            operator fun String.invoke(args: Int = 1, f: (List<Float>) -> Float?) = put(this, BuiltinData(args, f))
+            operator fun String.invoke(args: Int = 1, f: (List<Float>) -> Float?) =
+                put(this, InterpretedFunction(args, f))
 
             abs { (a) -> a.absoluteValue }
             arcsin { (a) -> asin(a) }
@@ -39,6 +40,15 @@ class Interpreter(
             sign { (a) -> a.sign }
             step(2) { (a, b) -> if (a < b) 0f else 1f }
             stop(0) { stop(); null }
+
+            (iteration.functions + initial.functions).forEach { (name, params, body) ->
+                name.value(params.size) { values ->
+                    val scope = params.map { it.value }.zip(values).toMap().toMutableMap()
+                    scope[name.value] = 0.0f
+                    body.run(scope)
+                    scope[name.value] ?: 0.0f
+                }
+            }
         }
     }
 
@@ -65,10 +75,10 @@ class Interpreter(
         if (++iterations >= maxIterations && maxIterations != -1) stopped = true
     }
 
-    private fun List<Expr>.run() {
+    private fun List<Expr>.run(scope: MutableMap<String, Float> = mutableMapOf()) {
         for (expr in this) {
             if (stopped) return
-            expr.eval(this@Interpreter)
+            expr.eval(this@Interpreter, scope)
         }
     }
 

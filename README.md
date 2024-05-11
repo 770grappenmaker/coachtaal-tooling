@@ -18,8 +18,8 @@ The interpreter is about 50-200x faster (depending on the model and the amount o
 - [x] Logging data (and converting to TSV/CSV)
 - [x] Visually view the data (`visualizer`)
 - [x] Compile to JVM bytecode (and dynamically loading and executing)
-- [ ] Do..while, repeat
-- [ ] Function and procedure definition and usage
+- [x] Do..while, repeat
+- [x] Function and procedure definition and usage
 - [ ] LSP / IntelliJ plugin
 
 ### Project Setup

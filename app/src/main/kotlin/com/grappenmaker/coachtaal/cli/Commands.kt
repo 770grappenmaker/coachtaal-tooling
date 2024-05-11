@@ -1,6 +1,7 @@
 package com.grappenmaker.coachtaal.cli
 
 import com.grappenmaker.coachtaal.*
+import com.grappenmaker.coachtaal.Project
 import java.nio.file.Path
 import kotlin.io.path.*
 import kotlin.random.Random
@@ -27,7 +28,7 @@ object Parse : Command() {
     private val language by enum<CliLanguage>()
 
     override fun invoke(args: List<String>) =
-        parseProgram(Path(program[args]).readText(), language[args].underlying).lines.forEach { println(it) }
+        println(parseProgram(Path(program[args]).readText(), language[args].underlying))
 }
 
 object Tokenize : Command() {
@@ -74,7 +75,7 @@ fun genericCompile(
     val output = relative.resolve(className)
     output.createParentDirectories()
 
-    val bytes = compileModel(className.removeSuffix(".class"), popt.lines, iopt.lines, language, runnable = true)
+    val bytes = compileModel(className.removeSuffix(".class"), popt, iopt, language, runnable = true)
     output.writeBytes(bytes)
 }
 
@@ -176,10 +177,31 @@ object Init : Command() {
     override val name = "init"
     override val aliases = setOf("i")
 
+    private val i by switch()
     private val language by optionalEnum(CliLanguage.DUTCH)
     private val compile by optionalBoolean(true)
 
-    override fun invoke(args: List<String>) {
-        Project(cwd, ProjectConfig(language[args], compile[args])).init()
+    override fun CommandContext.invoke() {
+        val config = if (i[this]) {
+            val byLowercase = enumValues<CliLanguage>().associateBy { it.name.lowercase() }
+            val langChoices = byLowercase.keys.joinToString("/")
+
+            val lang = generateSequence { question("What language will the project be written in? ($langChoices)") }
+                .firstNotNullOf { byLowercase[it.trim().lowercase()] }
+
+            val comp = question("Should this project use JIT compilation? (Y/n)")
+                .lowercase().trim().firstOrNull() != 'n'
+
+            println("The project will be written in $lang and will ${if (comp) "" else "not "}use JIT compilation.")
+
+            if (question("Is this information correct? (Y/n)").lowercase().trim().firstOrNull() != 'y') {
+                println("Cancelling init process")
+                return
+            }
+
+            ProjectConfig(lang, comp)
+        } else ProjectConfig(language[args], compile[args])
+
+        Project(cwd, config).init()
     }
 }

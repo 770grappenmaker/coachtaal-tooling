@@ -3,9 +3,7 @@ package com.grappenmaker.coachtaal.cli
 import com.grappenmaker.coachtaal.*
 import kotlinx.serialization.Serializable
 import java.nio.file.Path
-import kotlin.io.path.Path
 import kotlin.io.path.readText
-import kotlin.properties.PropertyDelegateProvider
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
 import kotlin.system.exitProcess
@@ -29,7 +27,10 @@ fun CommandHolding.printCommandHelp(): Nothing {
 }
 
 fun main(args: Array<String>) {
-    runCatching { RootCommand(args.toList()) }.onFailure {
+    val (switches, toCommand) = args.partition { it.length == 2 && it.first() == '-' }
+    val ctx = CommandContext(toCommand, switches.mapTo(hashSetOf()) { it[1] })
+
+    runCatching { with (RootCommand) { ctx() } }.onFailure {
         if (it is IllegalStateException) println(it.message)
         else it.printStackTrace()
     }
@@ -51,8 +52,8 @@ fun loadCliModel(programPath: Path, initialPath: Path, language: Language, compi
         program, initial, when {
             compile -> createCompiledModel<ModelRunner>(
                 compiledName = "$cliCompiledPrefix$cliModelCounter",
-                iter = popt.lines,
-                init = iopt.lines,
+                iter = popt,
+                init = iopt,
                 language = language
             )
 
@@ -73,11 +74,11 @@ abstract class Command {
     abstract val aliases: Set<String>
 
     open val usage by lazy {
-        parameters.joinToString(separator = " ") {
-            it.usage.surround(if (it.optional) "[" to "]" else "<" to ">")
-        }
+        (switches.map { "[-${it.name}]" } +
+                parameters.map { it.usage.surround(if (it.optional) "[" to "]" else "<" to ">") }).joinToString(" ")
     }
 
+    private val switches = mutableListOf<Switch>()
     private val parameters = mutableListOf<Parameter<*>>()
     private var seenOptional = false
 
@@ -106,8 +107,8 @@ abstract class Command {
     inner class ParameterDelegate<T>(
         private val ctor: (Int, String) -> Parameter<T>,
         private val default: String? = null,
-    ) : PropertyDelegateProvider<Any?, ReadOnlyProperty<Any?, Parameter<T>>> {
-        override fun provideDelegate(thisRef: Any?, property: KProperty<*>): ReadOnlyProperty<Any?, Parameter<T>> {
+    ) {
+        operator fun provideDelegate(thisRef: Any?, property: KProperty<*>): ReadOnlyProperty<Any?, Parameter<T>> {
             val impl = ctor(parameters.size, property.name)
             val actual = if (default != null) {
                 seenOptional = true
@@ -122,7 +123,20 @@ abstract class Command {
         }
     }
 
-    abstract operator fun invoke(args: List<String>)
+    inner class SwitchDelegate {
+        operator fun provideDelegate(thisRef: Any?, property: KProperty<*>): ReadOnlyProperty<Any?, Switch> {
+            val switch = Switch(property.name.single())
+            switches += switch
+            return ReadOnlyProperty { _, _ -> switch }
+        }
+    }
+
+    fun switch() = SwitchDelegate()
+
+    open operator fun CommandContext.invoke() = invoke(args)
+    open operator fun invoke(args: List<String>) {
+        error("At least one overload of Command#invoke has to be implemented!")
+    }
 
     fun prepareArguments(args: List<String>): List<String> =
         ParameterList(parameters.filterIsInstance<DefaultParameter<*>>().associate { it.index to it.default }, args)
@@ -132,7 +146,7 @@ abstract class CommandHolding : Command() {
     abstract val subCommands: List<Command>
 
     private val help = Help()
-    val actualCommands get() = subCommands + help
+    private val actualCommands get() = listOf(help) + subCommands
 
     override val usage get() = actualCommands.joinToString(System.lineSeparator()) { c ->
         val lines = c.usage.lines()
@@ -140,10 +154,11 @@ abstract class CommandHolding : Command() {
         c.name + lines.joinToString(separator = System.lineSeparator(), prefix = prefix) { " $it" }
     }
 
-    override fun invoke(args: List<String>) {
+    override fun CommandContext.invoke() {
         val sub = args.firstOrNull() ?: printCommandHelp()
         val target = actualCommands.find { it.match(sub) } ?: printHelp(1)
-        target(target.prepareArguments(args.drop(1)))
+        val ctx = CommandContext(target.prepareArguments(args.drop(1)), switches)
+        with (target) { ctx() }
     }
 
     inner class Help : Command() {
@@ -155,14 +170,28 @@ abstract class CommandHolding : Command() {
 
 fun Command.match(sub: String) = sub == name || sub in aliases
 
+data class CommandContext(val args: List<String>, val switches: Set<Char>)
+
+data class Switch(val name: Char) {
+    operator fun get(on: Set<Char>) = name in on
+    operator fun get(on: CommandContext) = get(on.switches)
+}
+
 sealed interface Parameter<T> {
     val index: Int
     val name: String
     val optional: Boolean get() = false
     val usage: String get() = name
+
     operator fun get(on: List<String>): T
+    operator fun get(on: CommandContext): T = get(on.args)
 }
 
 class ParameterList<T>(private val entries: Map<Int, T>, private val backing: List<T>) : List<T> by backing {
     override fun get(index: Int) = backing.getOrNull(index) ?: entries[index] ?: printHelp(1)
+}
+
+fun question(msg: String): String {
+    print("$msg ")
+    return readlnOrNull() ?: error("Standard input was closed unexpectedly")
 }

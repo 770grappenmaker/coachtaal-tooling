@@ -2,7 +2,7 @@ package com.grappenmaker.coachtaal
 
 import kotlin.reflect.full.declaredMemberProperties
 
-interface Language {
+sealed interface Language {
     val abs: String
     val arcsin: String
     val arccos: String
@@ -49,6 +49,11 @@ interface Language {
     val orOperator: String
 
     val onceInvalidStatement: String
+
+    val startFunction: String
+    val endFunction: String
+    val startProcedure: String
+    val endProcedure: String
 }
 
 val Language.allBuiltins get() = setOf(
@@ -60,7 +65,7 @@ val Language.allBuiltins get() = setOf(
 val Language.lookup get() = this::class.declaredMemberProperties.associate { it.name to it.call(this) as String }
 val Language.inverseLookup get() = lookup.asSequence().associate { (k, v) -> v to k }.toMap()
 
-object DutchLanguage : Language {
+data object DutchLanguage : Language {
     override val abs = "abs"
     override val arcsin = "arcsin"
     override val arccos = "arccos"
@@ -107,9 +112,14 @@ object DutchLanguage : Language {
     override val orOperator = "of"
 
     override val onceInvalidStatement = "zodra"
+
+    override val startFunction = "functie"
+    override val endFunction = "eindfunctie"
+    override val startProcedure = "procedure"
+    override val endProcedure = "eindprocedure"
 }
 
-object EnglishLanguage : Language {
+data object EnglishLanguage : Language {
     override val abs = "abs"
     override val arcsin = "arcsin"
     override val arccos = "arccos"
@@ -156,6 +166,11 @@ object EnglishLanguage : Language {
     override val orOperator = "or"
 
     override val onceInvalidStatement = "once"
+
+    override val startFunction = "function"
+    override val endFunction = "endfunction"
+    override val startProcedure = "procedure"
+    override val endProcedure = "endprocedure"
 }
 
 fun Identifier.translate(from: Language, to: Language) =
