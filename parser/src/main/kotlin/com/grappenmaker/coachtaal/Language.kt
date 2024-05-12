@@ -61,6 +61,18 @@ val Language.allBuiltins get() = setOf(
     round, factorial, max, min, random, sign, step, stop, on, off, pi
 )
 
+val Language.builtinFunctions get() = setOf(
+    abs, arcsin, arccos, arctan, sin, cos, tan, exp, ln, log, sqr, sqrt, floor,
+    round, factorial, max, min, random, sign, step, stop
+)
+
+val Language.builtinConstants get() = setOf(on, off, pi)
+
+val Language.keywords get() = setOf(
+    redoStatement, ifStatement, elseStatement, whileStatement, doWhileStatement,
+    endFunction, endDo, endProcedure, endRedo, endIfStatement, startDo
+)
+
 // FIXME: hacky
 val Language.lookup get() = this::class.declaredMemberProperties.associate { it.name to it.call(this) as String }
 val Language.inverseLookup get() = lookup.asSequence().associate { (k, v) -> v to k }.toMap()

@@ -1,7 +1,6 @@
 package com.grappenmaker.coachtaal.cli
 
 import com.grappenmaker.coachtaal.*
-import com.grappenmaker.coachtaal.Project
 import java.nio.file.Path
 import kotlin.io.path.*
 import kotlin.random.Random
@@ -14,10 +13,24 @@ object Format : Command() {
     override val aliases = setOf("f")
 
     private val program by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
 
     override fun invoke(args: List<String>) =
         println(parseProgram(Path(program[args]).readText(), language[args].underlying).asText())
+}
+
+object Translate : Command() {
+    override val name = "translate"
+    override val aliases = setOf<String>()
+
+    private val program by string()
+    private val from by enum<EnumLanguage>()
+    private val to by enum<EnumLanguage>()
+
+    override fun invoke(args: List<String>) {
+        val parsed = parseProgram(Path(program[args]).readText(), from[args].underlying)
+        println(parsed.copy(language = to[args].underlying).asText())
+    }
 }
 
 object Parse : Command() {
@@ -25,7 +38,7 @@ object Parse : Command() {
     override val aliases = setOf("p")
 
     private val program by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
 
     override fun invoke(args: List<String>) =
         println(parseProgram(Path(program[args]).readText(), language[args].underlying))
@@ -36,7 +49,7 @@ object Tokenize : Command() {
     override val aliases = setOf("t", "l")
 
     private val program by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
 
     override fun invoke(args: List<String>) =
         lexer(Path(program[args]).readText(), language[args].underlying).forEach { println(it) }
@@ -48,7 +61,7 @@ object Compile : Command() {
 
     private val program by string()
     private val initial by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
     private val output by optionalString("compiled${Random.nextUInt()}.class")
 
     override fun invoke(args: List<String>) {
@@ -107,7 +120,7 @@ object Visualize : Command() {
 
     private val program by string()
     private val initial by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
     private val xVariable by string()
     private val yVariable by string()
     private val compile by optionalBoolean(true)
@@ -160,7 +173,7 @@ object CSV : Command() {
 
     private val program by string()
     private val initial by string()
-    private val language by enum<CliLanguage>()
+    private val language by enum<EnumLanguage>()
     private val compile by optionalBoolean(true)
 
     override fun invoke(args: List<String>) {
@@ -178,12 +191,12 @@ object Init : Command() {
     override val aliases = setOf("i")
 
     private val i by switch()
-    private val language by optionalEnum(CliLanguage.DUTCH)
+    private val language by optionalEnum(EnumLanguage.DUTCH)
     private val compile by optionalBoolean(true)
 
     override fun CommandContext.invoke() {
         val config = if (i[this]) {
-            val byLowercase = enumValues<CliLanguage>().associateBy { it.name.lowercase() }
+            val byLowercase = enumValues<EnumLanguage>().associateBy { it.name.lowercase() }
             val langChoices = byLowercase.keys.joinToString("/")
 
             val lang = generateSequence { question("What language will the project be written in? ($langChoices)") }

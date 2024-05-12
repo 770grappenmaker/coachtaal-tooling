@@ -9,6 +9,7 @@ class StopAnalysis(program: ParsedProgram) {
     fun Identifier.check() = stopCalls.getOrPut(value) { byName[this]?.body?.callsStop() ?: false }
 
     private fun List<Expr>.callsStop() = any { it.callsStop() }
+
     private fun Expr.callsStop(): Boolean = when (this) {
         is CallExpr -> name.check()
         is ConditionalExpr -> {
@@ -285,6 +286,8 @@ fun Expr.optimize(): List<Expr> = when (this) {
             else -> listOf(iter)
         }
     }
+
+    is NewLineExpr -> emptyList()
 
     else -> listOf(
         when (this) {

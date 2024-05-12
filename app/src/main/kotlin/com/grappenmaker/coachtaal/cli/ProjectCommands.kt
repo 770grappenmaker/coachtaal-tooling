@@ -10,7 +10,7 @@ object Project : CommandHolding() {
     override val name = "project"
     override val aliases = setOf("proj")
     override val subCommands = listOf(
-        FormatProject, CompileProject, CleanProject, VisualizeProject, CSVProject, RunCompiledProject
+        FormatProject, TranslateProject, CompileProject, CleanProject, VisualizeProject, CSVProject, RunCompiledProject
     )
 }
 
@@ -26,6 +26,28 @@ object FormatProject : Command() {
         val lang = proj.config.language.underlying
         format(proj.initScriptPath, lang)
         format(proj.iterScriptPath, lang)
+    }
+}
+
+object TranslateProject : Command() {
+    override val name = "translate"
+    override val aliases = setOf<String>()
+
+    private val to by enum<EnumLanguage>()
+
+    override fun invoke(args: List<String>) {
+        val proj = cwd.loadProject()
+        val from = proj.config.language.underlying
+
+        val toLang = to[args]
+        fun translate(path: Path) {
+            val parsed = parseProgram(path.readText(), from)
+            path.writeText(parsed.copy(language = toLang.underlying).asText())
+        }
+
+        translate(proj.initScriptPath)
+        translate(proj.iterScriptPath)
+        proj.copy(config = proj.config.copy(language = toLang)).storeConfig()
     }
 }
 

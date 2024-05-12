@@ -8,8 +8,8 @@ fun List<Expr>.asText(language: Language) = joinToString("\n") { it.asText(langu
 fun List<Expr>.asBlock(language: Language) = asText(language).indent()
 private fun String.indent() = lines().joinToString("\n") { "  $it" }
 
-val Language.locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
-fun Language.formatConstant(cst: Float) = DecimalFormat.getNumberInstance(locale).format(cst)
+val Language.locale: Locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
+fun Language.formatConstant(cst: Float): String = DecimalFormat.getNumberInstance(locale).format(cst)
 
 // TODO: translation
 fun Expr.asText(language: Language): String = when (this) {
@@ -46,4 +46,6 @@ fun Expr.asText(language: Language): String = when (this) {
     is FunctionExpr -> "${language.startFunction} ${name.value}" +
             (if (parameters.isNotEmpty()) "(${parameters.joinToString(";") { it.value }})" else "") +
             "\n${body.asBlock(language)}\n${language.endFunction}"
+
+    is NewLineExpr -> "" // joined into newline! krazy
 }

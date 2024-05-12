@@ -3,6 +3,14 @@ package com.grappenmaker.coachtaal
 import kotlin.math.ceil
 import kotlin.math.pow
 
+class ParseException(
+    message: String,
+    val token: Token,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
+class ParseFailedException(message: String) : IllegalStateException(message)
+
 inline fun <reified V : Any, T> Iterable<T>.partitionIs(): Pair<List<V>, List<T>> {
     val resA = mutableListOf<V>()
     val resB = mutableListOf<T>()
@@ -60,13 +68,15 @@ fun Expr.humanFriendly() = when (this) {
     is UnaryMinusExpr -> "unary minus expression"
     is WhileExpr -> "while expression"
     is FunctionExpr -> "function \"${name.value}\" expression"
+    is NewLineExpr -> "new line"
 }
 
 class Parser(
     val tokens: List<Token>,
     private val language: Language = DutchLanguage,
-    val originalCode: String? = null,
+    private val originalCode: String? = null,
 ) {
+    private val caughtErrors = mutableListOf<ParseException>()
     var ptr = 0
     val isAtEnd get() = ptr !in tokens.indices
 
@@ -101,6 +111,53 @@ class Parser(
         return tokens[tempPtr]
     }
 
+    private fun takeStacking(open: String, close: String): List<Token> {
+        var count = 1
+        val res = mutableListOf<Token>()
+
+        while (!isAtEnd) {
+            val candidate = take(skipNewLine = false)
+            val info = candidate.info
+            if (info is Identifier) {
+                if (info.value == open) count++
+                if (info.value == close) count--
+            }
+
+            if (count == 0) return res
+            res += candidate
+        }
+
+        eofError("expected $close after $open")
+        error("Should be impossible???")
+    }
+
+    // just for if-else-endif :)
+    private fun takeStackingSpecial(): Pair<List<Token>, List<Token>> {
+        var count = 1
+        var seenElse = false
+        val resA = mutableListOf<Token>()
+        val resB = mutableListOf<Token>()
+
+        while (!isAtEnd) {
+            val candidate = take(skipNewLine = false)
+            val info = candidate.info
+            if (info is Identifier) {
+                if (info.value == language.ifStatement) count++
+                if (info.value == language.endIfStatement) count--
+                if (count == 1 && info.value == language.elseStatement) seenElse = true
+            }
+
+            if (count == 0) return resA to resB
+            (if (seenElse) resB else resA) += candidate
+        }
+
+        eofError(
+            if (seenElse) "expected ${language.endIfStatement} after ${language.elseStatement}"
+            else "expected ${language.endIfStatement} or ${language.elseStatement} after ${language.ifStatement}"
+        )
+        error("Should be impossible???")
+    }
+
     // Returns all next tokens satisfying [cond]
     private fun takeWhile(skipNewLine: Boolean = false, cond: (TokenInfo) -> Boolean) = generateSequence {
         if (isAtEnd) null else peek(skipNewLine = skipNewLine)
@@ -109,8 +166,11 @@ class Parser(
     }.toList()
 
     // Skips all newlines
-    private fun skipNewLine() {
-        while (!isAtEnd && tokens[ptr].info is NewLineToken) advance()
+    private inline fun skipNewLine(onEach: () -> Unit = {}) {
+        while (!isAtEnd && tokens[ptr].info is NewLineToken) {
+            advance()
+            onEach()
+        }
     }
 
     private fun advance() {
@@ -127,7 +187,7 @@ class Parser(
         return when (val info = curr.info) {
             is Identifier -> IdentifierExpr(info)
             is NumberToken -> LiteralExpr(info.value)
-            is GroupToken -> parseExpression(info.tokens, language, originalCode)
+            is GroupToken -> parseExpressionOrError(curr, info.tokens)
             else -> unexpected(curr, "expected identifier, number or parenthesized expression")
         }
     }
@@ -140,12 +200,12 @@ class Parser(
         var first = parseLeft()
 
         while (!isAtEnd) {
-            val operator = peek()
+            val operator = peek("one of the following operators expected: $operators")
             val info = if (operator.info is EqualsToken) BinaryOperatorToken("=")
             else operator.info as? BinaryOperatorToken ?: break
 
             if (info.operator !in operators) break
-            advance()
+            take()
 
             first = BinaryOperatorExpr(first, parseRight(), findOperator(info), info.operator)
         }
@@ -155,7 +215,7 @@ class Parser(
 
     private fun power() = binaryOperator(parseLeft = ::primary, parseRight = ::unary, operators = setOf("^"))
     private fun unary(): Expr {
-        val curr = peek()
+        val curr = peek("expected an expression")
         val info = curr.info
 
         return when {
@@ -179,58 +239,60 @@ class Parser(
 
     private fun assignment(id: Identifier) = AssignmentExpr(id, compare())
 
-    private fun ifStatement(): Expr {
+    private fun parseExpressionOrError(token: Token, block: List<Token>): Expr {
+        if (block.isEmpty()) unexpected(token, "expected an expression after it")
+        return parseExpression(block, language, originalCode)
+    }
+
+    private fun ifStatement(token: Token): Expr {
         val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.ifThen }
         take("""no "${language.ifThen}" after "${language.ifStatement}"""")
-
-        val expectedConditionals = setOf(language.elseStatement, language.endIfStatement)
-        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in expectedConditionals }
-        val tentativeEnd = take("""no "${language.elseStatement}" or "${language.endIfStatement}" after "${language.ifThen}"""")
-
-        val seenEnd = (tentativeEnd.info as? Identifier)?.value == language.endIfStatement
-        val expectElse = !seenEnd && !isAtEnd
-        val whenFalse = if (expectElse) takeWhile {
-            it !is Identifier || it.value.lowercase() != language.endIfStatement
-        } else null
-
-        if (expectElse) take("""expected "${language.endIfStatement}" after "${language.elseStatement}"""")
+        val (whenTrue, whenFalse) = takeStackingSpecial()
+//
+//        val expectedConditionals = setOf(language.elseStatement, language.endIfStatement)
+//        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in expectedConditionals }
+//        val tentativeEnd =
+//            take("""no "${language.elseStatement}" or "${language.endIfStatement}" after "${language.ifThen}"""")
+//
+//        val seenEnd = (tentativeEnd.info as? Identifier)?.value == language.endIfStatement
+//        val expectElse = !seenEnd && !isAtEnd
+//        val whenFalse = if (expectElse) takeWhile {
+//            it !is Identifier || it.value.lowercase() != language.endIfStatement
+//        } else null
+//
+//        if (expectElse) take("""expected "${language.endIfStatement}" after "${language.elseStatement}"""")
 
         return ConditionalExpr(
-            condition = parseExpression(condition, language, originalCode),
+            condition = parseExpressionOrError(token, condition),
             whenTrue = parseBlock(whenTrue, language, originalCode),
-            whenFalse = whenFalse?.let { parseBlock(it, language, originalCode) }
+            whenFalse = whenFalse.takeIf { it.isNotEmpty() }?.let { parseBlock(it, language, originalCode) }
         )
     }
 
     private fun redoStatement(): Expr {
         // Weirdly enough, *any* expression is valid, not only literals
         val amount = compare()
-        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.endRedo }
-
-        take("""no "${language.endRedo}" after "${language.redoStatement}"""")
+        val body = takeStacking(language.redoStatement, language.endRedo)
         return RepeatingExpr(parseBlock(body, language, originalCode), amount)
     }
 
-    private fun whileStatement(): Expr {
+    private fun whileStatement(token: Token): Expr {
         val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.startDo }
         take("""no "${language.startDo}" after "${language.whileStatement}"""")
 
-        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.endDo }
-        take("""no "${language.endDo}" after "${language.startDo}"""")
-
+        val body = takeStacking(language.startDo, language.endDo)
         return WhileExpr(
-            condition = parseExpression(condition, language, originalCode),
+            condition = parseExpressionOrError(token, condition),
             body = parseBlock(body, language, originalCode),
         )
     }
 
     private fun repeatStatement(): Expr {
-        val body = takeWhile { it !is Identifier || it.value.lowercase() != language.doWhileUntil }
-        take("""no "${language.doWhileUntil}" after "${language.doWhileStatement}"""")
+        val body = takeStacking(language.doWhileStatement, language.doWhileUntil)
         return RepeatUntilExpr(compare(), parseBlock(body, language, originalCode))
     }
 
-    private fun function(endName: String): Expr {
+    private fun function(openName: String, endName: String): Expr {
         val nameToken = take("function declaration without name")
         val name = nameToken.info as? Identifier ?: unexpected(nameToken, "expected an identifier for a function name")
         if (name.value in language.allBuiltins) error("Illegal function name ${name.value}")
@@ -241,9 +303,7 @@ class Parser(
         if (arguments.size != argumentNames.size)
             unexpected(nameToken, "Invalid parameter declaration for function ${name.value}")
 
-        val body = takeWhile { it !is Identifier || it.value.lowercase() != endName }
-        take("""no "$endName" in function declaration""")
-
+        val body = takeStacking(openName, endName)
         return FunctionExpr(name, argumentNames, parseBlock(body, language, originalCode), nameToken)
     }
 
@@ -253,15 +313,16 @@ class Parser(
             language.startProcedure -> {
                 println(
                     "Warning: procedures behave like functions in this implementation of Coach. " +
-                        "Use ${language.startFunction} instead of ${language.startProcedure}."
+                            "Use ${language.startFunction} instead of ${language.startProcedure}."
                 )
 
-                return function(language.endProcedure)
+                return function(language.startProcedure, language.endProcedure)
             }
-            language.startFunction -> return function(language.endFunction)
-            language.ifStatement -> return ifStatement()
+
+            language.startFunction -> return function(language.startFunction, language.endFunction)
+            language.ifStatement -> return ifStatement(idToken)
             language.redoStatement -> return redoStatement()
-            language.whileStatement -> return whileStatement()
+            language.whileStatement -> return whileStatement(idToken)
             language.doWhileStatement -> return repeatStatement()
             language.onceInvalidStatement -> unexpected(
                 idToken, "\"${language.onceInvalidStatement}\" is disabled, " +
@@ -278,7 +339,7 @@ class Parser(
         val arguments = (info as? GroupToken)?.verify()?.tokens
             ?.split { it.info is ParameterSeparatorToken } ?: emptyList()
 
-        return CallExpr(id, arguments.map { parseExpression(it, language, originalCode) }, idToken)
+        return CallExpr(id, arguments.map { parseExpressionOrError(curr, it) }, idToken)
     }
 
     private fun GroupToken.verify(): GroupToken {
@@ -305,18 +366,37 @@ class Parser(
         } else call(currToken)
     }
 
+    private fun recover() {
+        takeWhile(skipNewLine = false) { it !is NewLineToken }
+    }
+
     fun parseFull() = if (tokens.isEmpty()) emptyList() else buildList {
         skipNewLine()
 
         while (!isAtEnd) {
-            val newStatement = statement()
-            add(newStatement)
+            try {
+                val newStatement = statement()
+                add(newStatement)
 
-            if (!isAtEnd && tokens[ptr].info !is NewLineToken) {
-                unexpected(tokens[ptr], "after statement \"${newStatement.humanFriendly()}\"")
+                if (!isAtEnd && tokens[ptr].info !is NewLineToken) {
+                    unexpected(tokens[ptr], "after statement \"${newStatement.humanFriendly()}\", expected newline")
+                }
+
+                advance()
+                skipNewLine { add(NewLineExpr) }
+            } catch (e: ParseException) {
+                caughtErrors += e
+                recover()
+            } catch (e: ParseFailedException) {
+                caughtErrors += e.suppressedExceptions.filterIsInstance<ParseException>()
+                recover()
             }
+        }
 
-            skipNewLine()
+        if (caughtErrors.isNotEmpty()) {
+            val target = ParseFailedException("Parsing failed: ${caughtErrors.size} errors were found")
+            caughtErrors.forEach { target.addSuppressed(it) }
+            throw target
         }
     }
 
@@ -352,15 +432,11 @@ class Parser(
             """.trimIndent()
         } ?: ""
 
-        val hint = if (token.info is Identifier) {
-            "\n\nConsider whether the parsing configuration was correct, eg. does the language match?"
-        } else ""
-
-        error(header + context + hint)
+        throw ParseException(header + context, token)
     }
 
     fun List<Expr>.assertNoFunctions() = forEach { it.assertNoFunctions() }
-    fun Expr.assertNoFunctions(): Unit = when(this) {
+    fun Expr.assertNoFunctions(): Unit = when (this) {
         is ConditionalExpr -> {
             whenFalse?.assertNoFunctions()
             whenTrue.assertNoFunctions()
@@ -482,7 +558,16 @@ data class FunctionExpr(
         error("Function expressions should never be evaluated! This is a bug")
 }
 
-data class ParsedProgram(val lines: List<Expr>, val functions: List<FunctionExpr>, val language: Language)
+// Fake expr lol
+data object NewLineExpr : Expr {
+    override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) = ExprResult.None
+}
+
+data class ParsedProgram(
+    val lines: List<Expr>,
+    val functions: List<FunctionExpr>,
+    val language: Language
+)
 
 fun ParsedProgram.eval(interpreter: Interpreter) = lines.eval(interpreter, mutableMapOf())
 

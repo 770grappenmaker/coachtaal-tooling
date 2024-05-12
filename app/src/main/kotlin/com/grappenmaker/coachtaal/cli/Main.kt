@@ -1,7 +1,6 @@
 package com.grappenmaker.coachtaal.cli
 
 import com.grappenmaker.coachtaal.*
-import kotlinx.serialization.Serializable
 import java.nio.file.Path
 import kotlin.io.path.readText
 import kotlin.properties.ReadOnlyProperty
@@ -9,7 +8,7 @@ import kotlin.reflect.KProperty
 import kotlin.system.exitProcess
 
 object RootCommand : CommandHolding() {
-    override val subCommands = listOf(Init, Project, Visualize, CSV, Format, Compile, RunCompiled, Parse, Tokenize)
+    override val subCommands = listOf(Init, Project, Visualize, CSV, Format, Translate, Compile, RunCompiled, Parse, Tokenize)
     override val name get() = error("The root command does not have a name!")
     override val aliases = emptySet<String>()
 }
@@ -30,9 +29,15 @@ fun main(args: Array<String>) {
     val (switches, toCommand) = args.partition { it.length == 2 && it.first() == '-' }
     val ctx = CommandContext(toCommand, switches.mapTo(hashSetOf()) { it[1] })
 
-    runCatching { with (RootCommand) { ctx() } }.onFailure {
-        if (it is IllegalStateException) println(it.message)
-        else it.printStackTrace()
+    runCatching { with (RootCommand) { ctx() } }.onFailure { ex ->
+        when (ex) {
+            is ParseFailedException -> {
+                println(ex.message)
+                ex.suppressedExceptions.forEach { println(it.message) }
+            }
+            is IllegalStateException -> println(ex.message)
+            else -> ex.printStackTrace()
+        }
     }
 }
 
@@ -60,11 +65,6 @@ fun loadCliModel(programPath: Path, initialPath: Path, language: Language, compi
             else -> Interpreter(popt, iopt, language)
         }
     )
-}
-
-@Serializable
-enum class CliLanguage(val underlying: Language) {
-    ENGLISH(EnglishLanguage), DUTCH(DutchLanguage)
 }
 
 fun String.surround(lr: Pair<String, String>) = lr.first + this + lr.second

@@ -52,14 +52,13 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
                 val header = "Illegal character (as $info) while lexing at line ${token.line}, " +
                         "column ${token.column}, \"${token.lexeme}\": $message"
 
-
                 val targetLine = input.lines()[token.line - 1]
                 val context = "\n\n" + """
                     $targetLine
                     ${" ".repeat(token.column - 1)}^ here
                 """.trimIndent()
 
-                error(header + context)
+                throw ParseException(header + context, token)
             }
         }
 
@@ -106,7 +105,7 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
                 }
                 ';' -> conditionalToken(ParameterSeparatorToken, groupStack.isNotEmpty(), "; outside of parentheses")
                 ':' -> conditionalToken(AssignmentToken, match('='), ": without = (assignment operator)")
-                else -> conditionalToken(InvalidToken, false, "no such token")
+                else -> conditionalToken(InvalidToken, false, "character not allowed for identifiers")
             }
         }
 
