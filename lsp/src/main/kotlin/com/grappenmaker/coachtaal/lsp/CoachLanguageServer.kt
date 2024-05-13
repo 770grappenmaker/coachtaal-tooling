@@ -25,6 +25,20 @@ val serverVersion by lazy {
     ClassLoader.getSystemResourceAsStream("server-version")?.readBytes()?.decodeToString() ?: "unknown"
 }
 
+internal val tokensLegend = SemanticTokensLegend(
+    listOf(
+        SemanticTokenTypes.Function,
+        SemanticTokenTypes.Keyword,
+        SemanticTokenTypes.Variable,
+        SemanticTokenTypes.Number,
+        SemanticTokenTypes.Operator,
+    ),
+    listOf(
+        SemanticTokenModifiers.DefaultLibrary,
+        SemanticTokenModifiers.Readonly
+    )
+)
+
 object CoachLanguageServer : LanguageServer, LanguageClientAware {
     val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private const val serverName = "Coach Language Server"
@@ -37,6 +51,11 @@ object CoachLanguageServer : LanguageServer, LanguageClientAware {
                 positionEncoding = PositionEncodingKind.UTF16
                 documentFormattingProvider = Either.forLeft(true)
                 completionProvider = CompletionOptions(false, emptyList())
+                semanticTokensProvider = SemanticTokensWithRegistrationOptions(
+                    tokensLegend,
+                    true,
+                    false
+                )
 //                hoverProvider = Either.forLeft(true)
 //                signatureHelpProvider = SignatureHelpOptions(listOf("(", ";"))
 //                definitionProvider = Either.forLeft(true)
@@ -278,14 +297,14 @@ object CoachTextDocuments : TextDocumentService {
         val snippets = listOf(
             snippet(
                 "if-statement", """
-                    ${lang.ifStatement} ${'$'}{1:condition} then
+                    ${lang.ifStatement} ${'$'}{1:condition} ${lang.ifThen}
                       ${'$'}{0}
                     ${lang.endIfStatement}
                 """.trimIndent()
             ),
             snippet(
                 "if-else", """
-                    ${lang.ifStatement} ${'$'}{1:condition} then
+                    ${lang.ifStatement} ${'$'}{1:condition} ${lang.ifThen}
                       ${'$'}{2}
                     ${lang.elseStatement}
                       ${'$'}{0}
@@ -330,4 +349,81 @@ object CoachTextDocuments : TextDocumentService {
         val keywords = lang.keywords.map { CompletionItem(it).apply { kind = Keyword } }
         Either.forLeft(completions + builtinFunctions + keywords + builtinConstants + snippets)
     }
+
+    override fun semanticTokensFull(
+        params: SemanticTokensParams
+    ): CompletableFuture<SemanticTokens> = CoachLanguageServer.scope.future {
+        val state = getState(params.textDocument.uri)
+        val lang = config.language.underlying
+        val file = state.lines.joinToString("\n")
+        val lexed = lexer(file) // TODO: error handling
+        val flatTokens = lexed.flatMap {
+            val info = it.info
+            if (info is GroupToken) info.tokens else listOf(it)
+        }
+
+        val variables = runCatching { parseProgram(file, lang).findNonConstant() }
+            .getOrElse { setOf() }
+            .mapTo(hashSetOf()) { it.value }
+
+        val result = flatTokens.mapNotNull { (info, lexeme, line, column) ->
+            val type = when (info) {
+                AssignmentToken, is BinaryOperatorToken, EqualsToken, NotToken -> SemanticTokenTypes.Operator
+                is Identifier -> when (info.value) {
+                    in lang.keywords -> SemanticTokenTypes.Keyword
+                    in lang.builtinFunctions -> SemanticTokenTypes.Function
+                    else -> SemanticTokenTypes.Variable
+                }
+                is NumberToken -> SemanticTokenTypes.Number
+                else -> return@mapNotNull null
+            }
+
+            val modifiers = when (info) {
+                is Identifier ->
+                    when (info.value) {
+                        in lang.allBuiltins -> setOf(SemanticTokenModifiers.DefaultLibrary)
+                        !in variables -> setOf(SemanticTokenModifiers.Readonly)
+                        else -> setOf()
+                    }
+                else -> setOf()
+            }
+
+            UnencodedSemanticToken(line - 1, column - 1, lexeme.length, type, modifiers)
+        }
+
+        SemanticTokens(result.encodeRelative())
+    }
+}
+
+data class UnencodedSemanticToken(
+    val line: Int,
+    val char: Int,
+    val length: Int,
+    val type: String,
+    val modifiers: Set<String>
+)
+
+fun UnencodedSemanticToken.encode() = listOf(
+    line, char, length,
+    tokensLegend.tokenTypes.indexOf(type),
+    modifiers.fold(0) { acc, curr -> acc or (1 shl tokensLegend.tokenModifiers.indexOf(curr)) }
+)
+
+fun List<UnencodedSemanticToken>.encode() = flatMap { it.encode() }
+fun List<UnencodedSemanticToken>.encodeRelative() = relativize().encode()
+
+fun List<UnencodedSemanticToken>.relativize(): List<UnencodedSemanticToken> {
+    var currLine = 0
+    var currChar = 0
+    val res = mutableListOf<UnencodedSemanticToken>()
+
+    for (unencoded in this) {
+        if (currLine != unencoded.line) currChar = 0
+        res += unencoded.copy(line = unencoded.line - currLine, char = unencoded.char - currChar)
+
+        currLine = unencoded.line
+        currChar = unencoded.char
+    }
+
+    return res
 }

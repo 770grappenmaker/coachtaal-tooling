@@ -5,6 +5,7 @@ plugins {
 
 intellij {
     pluginName.set("CoachTaal")
+    plugins.set(listOf("com.intellij.java"))
     version.set("2024.1.1")
     type.set("IU")
 }

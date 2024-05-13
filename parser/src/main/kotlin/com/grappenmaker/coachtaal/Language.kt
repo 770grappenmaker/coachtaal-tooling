@@ -70,7 +70,7 @@ val Language.builtinConstants get() = setOf(on, off, pi)
 
 val Language.keywords get() = setOf(
     redoStatement, ifStatement, elseStatement, whileStatement, doWhileStatement,
-    endFunction, endDo, endProcedure, endRedo, endIfStatement, startDo
+    endFunction, endDo, endProcedure, endRedo, endIfStatement, startDo, ifThen, startFunction, startProcedure
 )
 
 // FIXME: hacky
