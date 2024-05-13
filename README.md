@@ -20,7 +20,7 @@ The interpreter is about 50-200x faster (depending on the model and the amount o
 - [x] Compile to JVM bytecode (and dynamically loading and executing)
 - [x] Do..while, repeat
 - [x] Function and procedure definition and usage
-- [ ] LSP / IntelliJ plugin
+- [x] LSP / IntelliJ plugin (partially)
 
 ### Project Setup
 1. Clone this repository
