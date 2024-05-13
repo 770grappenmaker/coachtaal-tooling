@@ -239,8 +239,8 @@ class Parser(
 
     private fun assignment(id: Identifier) = AssignmentExpr(id, compare())
 
-    private fun parseExpressionOrError(token: Token, block: List<Token>): Expr {
-        if (block.isEmpty()) unexpected(token, "expected an expression after it")
+    private fun parseExpressionOrError(token: Token, block: List<Token>, expected: String = "an expression"): Expr {
+        if (block.isEmpty()) unexpected(token, "expected $expected after it")
         return parseExpression(block, language, originalCode)
     }
 
@@ -248,22 +248,9 @@ class Parser(
         val condition = takeWhile { it !is Identifier || it.value.lowercase() != language.ifThen }
         take("""no "${language.ifThen}" after "${language.ifStatement}"""")
         val (whenTrue, whenFalse) = takeStackingSpecial()
-//
-//        val expectedConditionals = setOf(language.elseStatement, language.endIfStatement)
-//        val whenTrue = takeWhile { it !is Identifier || it.value.lowercase() !in expectedConditionals }
-//        val tentativeEnd =
-//            take("""no "${language.elseStatement}" or "${language.endIfStatement}" after "${language.ifThen}"""")
-//
-//        val seenEnd = (tentativeEnd.info as? Identifier)?.value == language.endIfStatement
-//        val expectElse = !seenEnd && !isAtEnd
-//        val whenFalse = if (expectElse) takeWhile {
-//            it !is Identifier || it.value.lowercase() != language.endIfStatement
-//        } else null
-//
-//        if (expectElse) take("""expected "${language.endIfStatement}" after "${language.elseStatement}"""")
 
         return ConditionalExpr(
-            condition = parseExpressionOrError(token, condition),
+            condition = parseExpressionOrError(token, condition, "a condition"),
             whenTrue = parseBlock(whenTrue, language, originalCode),
             whenFalse = whenFalse.takeIf { it.isNotEmpty() }?.let { parseBlock(it, language, originalCode) }
         )
@@ -282,7 +269,7 @@ class Parser(
 
         val body = takeStacking(language.startDo, language.endDo)
         return WhileExpr(
-            condition = parseExpressionOrError(token, condition),
+            condition = parseExpressionOrError(token, condition, "a condition"),
             body = parseBlock(body, language, originalCode),
         )
     }

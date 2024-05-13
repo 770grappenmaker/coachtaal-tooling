@@ -13,9 +13,7 @@ import org.eclipse.lsp4j.launch.LSPLauncher
 import org.eclipse.lsp4j.services.*
 import java.net.URI
 import java.util.concurrent.CompletableFuture
-import kotlin.io.path.exists
-import kotlin.io.path.readLines
-import kotlin.io.path.toPath
+import kotlin.io.path.*
 
 fun main() {
     val launcher = LSPLauncher.createServerLauncher(CoachLanguageServer, System.`in`, System.out)
@@ -66,20 +64,21 @@ object CoachWorkspaces : WorkspaceService {
     }
 
     override fun didChangeWatchedFiles(params: DidChangeWatchedFilesParams) {
-        val configChange = params.changes.find { it.uri.endsWith(coachProjectFileName) } ?: return
-        forceUpdateURI(configChange.uri)
+        params.changes.forEach { forceUpdateURI(URI(it.uri)) }
     }
 }
 
-fun forceUpdateURI(uri: String) = DocumentState(uri, URI(uri).toPath().readLines(), 0, false).register()
-fun forceUpdateURI(uri: URI) = DocumentState(uri.toString(), uri.toPath().readLines(), 0, false).register()
-fun String.uriPathPart() = URI(this).path
+fun forceUpdateURI(uri: URI) {
+    val path = uri.toPath()
+    if (!path.exists()) return
+    DocumentState(uri, path.readLines(), 0, false).register()
+}
 
 data class DocumentState(
-    val uri: String,
+    val uri: URI,
     val lines: List<String>,
     val version: Int,
-    val coach: Boolean = uri.uriPathPart().endsWith(".$coachExtension")
+    val coach: Boolean = uri.path.endsWith(".$coachExtension")
 ) {
     inline fun update(block: DocumentState.() -> DocumentState) = block(this).register()
 
@@ -88,17 +87,19 @@ data class DocumentState(
 
         when {
             coach -> {
-                val potConfig = URI(uri).toPath().resolveSibling(coachProjectFileName)
-                if (potConfig.exists()) forceUpdateURI(potConfig.toUri())
+                if (!CoachTextDocuments.hasLoadedConfig) {
+                    forceUpdateURI(uri.toPath().resolveSibling(coachProjectFileName).toUri())
+                }
 
                 sendDiagnostics()
             }
-            uri.uriPathPart().endsWith(coachProjectFileName) -> CoachTextDocuments.updateConfig(this)
+
+            uri.path.endsWith(coachProjectFileName) -> CoachTextDocuments.updateConfig(this)
         }
     }
 
     fun sendDiagnostics() = CoachLanguageServer.client.publishDiagnostics(
-        PublishDiagnosticsParams(uri, diagnostics(), version)
+        PublishDiagnosticsParams(uri.toString(), diagnostics(), version)
     )
 
     fun tryParse() = runCatching {
@@ -144,9 +145,13 @@ data class DocumentState(
         Position(lines.lastIndex, lines.last().length)
     )
 
-    fun format() =
-        if (coach) tryParse().getOrNull()?.asText()?.let { listOf(TextEdit(fullRange(), it)) } ?: emptyList()
-        else null
+    fun format(): List<TextEdit>? {
+        if (!coach) return null
+
+        val parsed = tryParse().getOrNull() ?: return null
+        val optimized = if (CoachTextDocuments.config.optimize) parsed.optimize() else parsed
+        return listOf(TextEdit(fullRange(), optimized.asText()))
+    }
 }
 
 fun List<String>.relevantParts(range: Range) = this[range.start.line] to this[range.end.line]
@@ -192,15 +197,25 @@ sealed interface TryParseResult {
 }
 
 object CoachTextDocuments : TextDocumentService {
-    val sources = mutableMapOf<String, DocumentState>()
+    val sources = mutableMapOf<URI, DocumentState>()
+    val hasLoadedConfig get() = sources.keys.any { it.path.endsWith(coachProjectFileName) }
+    val coachSources get() = sources.values.filter { it.coach }
+
     var config = ProjectConfig()
 
     override fun didOpen(params: DidOpenTextDocumentParams) {
         DocumentState(
-            params.textDocument.uri,
+            URI(params.textDocument.uri),
             params.textDocument.text.lines(),
             params.textDocument.version
         ).register()
+
+        URI(params.textDocument.uri).toPath().parent.listDirectoryEntries()
+            .filter { it.extension == coachExtension }
+            .forEach { pot ->
+                val uri = pot.toUri()
+                if (uri !in sources) DocumentState(uri, pot.readLines(), 0, true).register()
+            }
     }
 
     override fun didChange(params: DidChangeTextDocumentParams) {
@@ -216,7 +231,7 @@ object CoachTextDocuments : TextDocumentService {
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
-        sources -= params.textDocument.uri
+        sources -= URI(params.textDocument.uri)
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
@@ -224,7 +239,7 @@ object CoachTextDocuments : TextDocumentService {
         if (params.text != null) state.update { copy(lines = params.text.lines()) }
     }
 
-    private fun getState(uri: String) = sources[uri] ?: error("Invalid document $uri")
+    private fun getState(uri: String) = sources[URI(uri)] ?: error("Invalid document $uri")
 
     override fun formatting(params: DocumentFormattingParams): CompletableFuture<List<TextEdit>> =
         CoachLanguageServer.scope.future { getState(params.textDocument.uri).format() ?: emptyList() }
@@ -239,6 +254,20 @@ object CoachTextDocuments : TextDocumentService {
         insertTextFormat = InsertTextFormat.Snippet
         insertTextMode = InsertTextMode.AdjustIndentation
         insertText = text
+    }
+
+    private fun DocumentState.completion(): List<CompletionItem> {
+        val parsed = tryParse().getOrNull() ?: return emptyList()
+        val analysis = parsed.analyzeVariables()
+
+        val constant = (analysis.constants.keys.map { it.value }.toSet() - parsed.language.builtinConstants)
+            .map { CompletionItem(it).apply { kind = Constant } }
+
+        val nonConstant = (analysis.assignments - analysis.constants.keys)
+            .map { CompletionItem(it.value).apply { kind = Variable } }
+
+        val functions = parsed.functions.map { CompletionItem(it.name.value).apply { kind = Function } }
+        return constant + nonConstant + functions
     }
 
     override fun completion(
@@ -293,23 +322,12 @@ object CoachTextDocuments : TextDocumentService {
             )
         )
 
-        val state = getState(position.textDocument.uri)
-        val parsed = state.tryParse().getOrNull()
+        val completions = if (hasLoadedConfig) coachSources.flatMap { it.completion() }.distinct()
+        else getState(position.textDocument.uri).completion()
 
-        val vars = parsed?.analyzeVariables()?.let { analysis ->
-            val constant = (analysis.constants.keys.map { it.value }.toSet() - lang.builtinConstants)
-                .map { CompletionItem(it).apply { kind = Constant } }
-
-            val nonConstant = (analysis.assignments - analysis.constants.keys)
-                .map { CompletionItem(it.value).apply { kind = Variable } }
-
-            constant + nonConstant
-        } ?: listOf()
-
-        val functions = parsed?.functions?.map { CompletionItem(it.name.value).apply { kind = Function } } ?: listOf()
         val builtinFunctions = lang.builtinFunctions.map { CompletionItem(it).apply { kind = Function } }
         val builtinConstants = lang.builtinConstants.map { CompletionItem(it).apply { kind = Constant } }
         val keywords = lang.keywords.map { CompletionItem(it).apply { kind = Keyword } }
-        Either.forLeft(vars + builtinFunctions + keywords + builtinConstants + functions + snippets)
+        Either.forLeft(completions + builtinFunctions + keywords + builtinConstants + snippets)
     }
 }

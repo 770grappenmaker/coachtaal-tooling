@@ -35,9 +35,10 @@ tasks {
     val copyBuiltLsp by registering(Copy::class) {
         dependsOn(jar)
         from(jar.get().outputs.files.singleFile)
-        into(projectDir.resolve("extension"))
+        into(projectDir.resolve("extension").resolve("build"))
         rename { "lsp.jar" }
     }
 
+    clean { delete(copyBuiltLsp) }
     build { dependsOn(copyBuiltLsp) }
 }

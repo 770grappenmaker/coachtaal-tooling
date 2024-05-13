@@ -1,4 +1,5 @@
 import { workspace, ExtensionContext, commands } from 'vscode';
+import { join } from 'path';
 
 import {
 	LanguageClient,
@@ -12,7 +13,7 @@ let client: LanguageClient;
 export function activate(context: ExtensionContext) {
 	console.log("Activated Coach extension.");
 
-	const jarPath = context.asAbsolutePath("lsp.jar");
+	const jarPath = context.asAbsolutePath(join("build", "lsp.jar"));
 	const args = ["-jar", jarPath];
 	const serverOptions: ServerOptions = {
 		run: { transport: TransportKind.stdio, command: "java", args },
@@ -21,8 +22,7 @@ export function activate(context: ExtensionContext) {
 
 	const clientOptions: LanguageClientOptions = {
 		documentSelector: [
-			{ scheme: 'file', language: 'plaintext', pattern: "**/*.coach" },
-			{ scheme: 'file', language: 'json', pattern: "**/project.json" },
+			{ scheme: 'file', language: 'plaintext', pattern: "**/*.coach" }
 		],
 		synchronize: {
 			fileEvents: [

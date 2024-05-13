@@ -48,10 +48,16 @@ const val cliCompiledPrefix = "com/grappenmaker/coachtaal/CliCompiledModel"
 
 data class CliModel(val program: ParsedProgram, val initial: ParsedProgram, val runner: ModelRunner)
 
-fun loadCliModel(programPath: Path, initialPath: Path, language: Language, compile: Boolean): CliModel {
+fun loadCliModel(
+    programPath: Path,
+    initialPath: Path,
+    language: Language,
+    compile: Boolean,
+    optimize: Boolean = true
+): CliModel {
     val program = parseProgram(programPath.readText(), language)
     val initial = parseProgram(initialPath.readText(), language)
-    val (popt, iopt) = program.optimizeWithInit(initial)
+    val (popt, iopt) = if (optimize) program.optimizeWithInit(initial) else program to initial
 
     return CliModel(
         program, initial, when {

@@ -82,8 +82,9 @@ fun genericCompile(
     init: ParsedProgram,
     className: String,
     relative: Path = cwd,
+    optimize: Boolean = true,
 ) {
-    val (popt, iopt) = program.optimizeWithInit(init)
+    val (popt, iopt) = if (optimize) program.optimizeWithInit(init) else program to init
 
     val output = relative.resolve(className)
     output.createParentDirectories()

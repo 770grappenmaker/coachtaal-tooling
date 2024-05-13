@@ -3,7 +3,7 @@ package com.grappenmaker.coachtaal
 import java.text.DecimalFormat
 import java.util.*
 
-fun ParsedProgram.asText() = lines.asText(language)
+fun ParsedProgram.asText() = (functions + lines).asText(language)
 fun List<Expr>.asText(language: Language) = joinToString("\n") { it.asText(language) }
 fun List<Expr>.asBlock(language: Language) = asText(language).indent()
 private fun String.indent() = lines().joinToString("\n") { "  $it" }

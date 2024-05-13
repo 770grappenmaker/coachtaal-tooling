@@ -33,6 +33,7 @@ fun Project.compile() {
         parseProgram(iterScriptPath.readText(), actualLanguage),
         parseProgram(initScriptPath.readText(), actualLanguage),
         output.name,
-        output.parent
+        output.parent,
+        config.optimize
     )
 }

@@ -25,11 +25,11 @@ class StopAnalysis(program: ParsedProgram) {
 
 fun ParsedProgram.terminableFunctions(): Set<FunctionExpr> {
     val target = StopAnalysis(this)
-    return with (target) { functions.filterTo(hashSetOf()) { it.name.check() } }
+    return with(target) { functions.filterTo(hashSetOf()) { it.name.check() } }
 }
 
 // not WILL terminate since halting problem xd
-fun ParsedProgram.couldTerminate() = with (StopAnalysis(this)) { lines.couldTerminate() }
+fun ParsedProgram.couldTerminate() = with(StopAnalysis(this)) { lines.couldTerminate() }
 
 context(StopAnalysis)
 fun List<Expr>.couldTerminate() = any { it.couldTerminate() }
@@ -207,8 +207,13 @@ fun ParsedProgram.assertTermination(): ParsedProgram {
 }
 
 fun ParsedProgram.optimize() = optimizeInternal(analyzeVariables().constants)
-private fun ParsedProgram.optimizeInternal(constants: Map<Identifier, Float>) =
-    copy(lines = with(OptimizerContext(constants)) { lines.optimize() })
+private fun ParsedProgram.optimizeInternal(constants: Map<Identifier, Float>): ParsedProgram {
+    val ctx = OptimizerContext(constants)
+    return copy(
+        lines = with(ctx) { lines.optimize() },
+        functions = functions.map { it.copy(body = with(ctx) { it.body.optimize() }) }
+    )
+}
 
 context(OptimizerContext)
 fun List<Expr>.optimize(): List<Expr> = flatMap { it.optimize() }
@@ -286,8 +291,6 @@ fun Expr.optimize(): List<Expr> = when (this) {
             else -> listOf(iter)
         }
     }
-
-    is NewLineExpr -> emptyList()
 
     else -> listOf(
         when (this) {

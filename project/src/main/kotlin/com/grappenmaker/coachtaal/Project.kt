@@ -97,6 +97,7 @@ data class ProjectConfig(
     val language: EnumLanguage = EnumLanguage.DUTCH,
     val compiled: Boolean = true,
     val useCompilationCache: Boolean = true,
+    val optimize: Boolean = true,
     // TODO
 )
 

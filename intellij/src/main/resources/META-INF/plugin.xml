@@ -1,0 +1,28 @@
+<idea-plugin>
+    <id>com.grappenmaker.coachtaal.idea</id>
+    <name>CoachTaal</name>
+    <vendor>770grappenmaker</vendor>
+
+    <depends>com.intellij.modules.ultimate</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType name="Coach"
+                  language="Coach"
+                  implementationClass="com.grappenmaker.coachtaal.idea.CoachFileType"
+                  extensions="coach"
+                  fieldName="INSTANCE"/>
+
+<!--        <lang.formatter language="Prisma"-->
+<!--                        implementationClass="org.intellij.prisma.ide.formatter.PrismaFormattingModelBuilder"/>-->
+<!--        <postFormatProcessor-->
+<!--                implementation="org.intellij.prisma.ide.formatter.PrismaTrailingSpacesFormatProcessor"/>-->
+<!--        <formattingService implementation="org.intellij.prisma.ide.formatter.PrismaFormattingService"/>-->
+<!--        <formatOnSaveOptions.defaultsProvider implementation="org.intellij.prisma.ide.formatter.PrismaFormatOnSaveDefaultsProvider"/>-->
+
+<!--        <completion.contributor language="Prisma"-->
+<!--                                implementationClass="org.intellij.prisma.ide.completion.PrismaCompletionContributor"/>-->
+<!--        <lookup.charFilter implementation="org.intellij.prisma.ide.completion.PrismaCharFilter"/>-->
+
+        <platform.lsp.serverSupportProvider implementation="com.grappenmaker.coachtaal.idea.CoachLspServerSupportProvider"/>
+    </extensions>
+</idea-plugin>
