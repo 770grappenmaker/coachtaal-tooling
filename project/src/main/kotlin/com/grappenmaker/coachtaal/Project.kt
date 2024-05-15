@@ -1,22 +1,18 @@
 package com.grappenmaker.coachtaal
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.objectweb.asm.ClassReader
 import java.nio.file.Path
 import java.security.MessageDigest
-import kotlin.io.path.createDirectories
-import kotlin.io.path.exists
-import kotlin.io.path.name
-import kotlin.io.path.readBytes
-import kotlin.io.path.readText
-import kotlin.io.path.useDirectoryEntries
-import kotlin.io.path.writeText
+import kotlin.io.path.*
 
 const val coachExtension = "coach"
-const val coachProjectFileName = "project.json"
+const val coachInitFileName = "init.$coachExtension"
+const val coachIterFileName = "iter.$coachExtension"
+const val coachProjectFileName = "project.coach.json"
+const val coachFormatterFileName = "formatter.coach.json"
 
 private val json = Json {
     encodeDefaults = true
@@ -25,10 +21,19 @@ private val json = Json {
 }
 
 fun String.decodeProjectConfig() = json.decodeFromString<ProjectConfig>(this)
+fun String.decodeFormatterConfig() = json.decodeFromString<FormatterConfig>(this)
 
 fun Path.projectConfig() = resolve(coachProjectFileName)
-fun Path.loadProject() = Project(this, projectConfig().readText().decodeProjectConfig())
-    .also { it.createDirectories() }
+fun Path.formatterConfig() = resolve(coachFormatterFileName)
+
+private inline fun <reified T : Any> Path.jsonOrEmpty() =
+    json.decodeFromString<T>(runCatching { readText() }.getOrElse { "{}" })
+
+fun Path.loadProject() = Project(
+    this,
+    projectConfig().jsonOrEmpty(),
+    formatterConfig().jsonOrEmpty()
+).also { it.createDirectories() }
 
 inline fun <reified T : ModelRunner> Path.loadCompiledModel(): ModelRunner {
     val bytes = readBytes()
@@ -36,13 +41,18 @@ inline fun <reified T : ModelRunner> Path.loadCompiledModel(): ModelRunner {
     return loadCompiledModel<T>(reader.className.replace('/', '.'), bytes)
 }
 
-data class Project(val dir: Path, val config: ProjectConfig)
+data class Project(
+    val dir: Path,
+    val config: ProjectConfig,
+    val formatter: FormatterConfig = FormatterConfig()
+)
 
-val Project.initScriptPath get() = dir.resolve("init.$coachExtension")
-val Project.iterScriptPath get() = dir.resolve("iter.$coachExtension")
+val Project.initScriptPath get() = dir.resolve(coachInitFileName)
+val Project.iterScriptPath get() = dir.resolve(coachIterFileName)
 val Project.resultsDir get() = dir.resolve("results")
 val Project.buildDir get() = dir.resolve("build")
 val Project.configPath get() = dir.projectConfig()
+val Project.formatterConfigPath get() = dir.formatterConfig()
 val Project.compilationOutput get() = buildDir.resolve("${dir.name}.class")
 val Project.compilationHash get() = buildDir.resolve(".hash")
 
@@ -64,7 +74,7 @@ fun Project.createDirectories() {
 }
 
 fun Project.init() {
-    if (dir.useDirectoryEntries { it.count() > 0 }) error("Directory $dir is not empty!")
+    if (configPath.exists()) error("Directory $dir has already been initialized!")
 
     createDirectories()
     initScriptPath.writeText(
@@ -90,7 +100,10 @@ fun Project.init() {
     )
 }
 
-fun Project.storeConfig() = configPath.writeText(json.encodeToString(config))
+fun Project.storeConfig() {
+    configPath.writeText(json.encodeToString(config))
+    formatterConfigPath.writeText(json.encodeToString(formatter))
+}
 
 @Serializable
 data class ProjectConfig(

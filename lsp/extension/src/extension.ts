@@ -22,15 +22,9 @@ export function activate(context: ExtensionContext) {
 
 	const clientOptions: LanguageClientOptions = {
 		documentSelector: [
-			{ scheme: 'file', language: 'plaintext', pattern: "**/*.coach" }
-		],
-		synchronize: {
-			fileEvents: [
-				workspace.createFileSystemWatcher('init.coach'),
-				workspace.createFileSystemWatcher('iter.coach'),
-				workspace.createFileSystemWatcher('project.json'),
-			]
-		}
+			{ scheme: 'file', language: 'plaintext', pattern: "**/*.coach" },
+			{ scheme: 'file', language: 'json', pattern: "**/*.coach.json" },
+		]
 	};
 
 	client = new LanguageClient(

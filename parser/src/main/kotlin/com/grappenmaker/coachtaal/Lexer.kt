@@ -1,12 +1,16 @@
 package com.grappenmaker.coachtaal
 
-fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
+fun lexer(input: String, language: Language): List<Token> {
     val nameTokens = mapOf(
         language.assignmentLiteral to AssignmentToken,
         language.notOperator to NotToken,
         language.orOperator to BinaryOperatorToken("||"),
         language.andOperator to BinaryOperatorToken("&&"),
     )
+
+    // oh no parser != lexer
+    // TODO: we need to clean this shit up
+    val lexingErrors = mutableListOf<ParseException>()
 
     var ptr = 0
     var lineStart = 0
@@ -24,10 +28,6 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
     }
 
     fun takeDigits() = takeWhile { it.isDigit() }
-
-    fun skip(target: Char) {
-        while (ptr + 1 in input.indices && input[ptr + 1] != target) ptr++
-    }
 
     fun match(n: Int = 1, cond: (Char) -> Boolean): Boolean {
         if (ptr + n !in input.indices || !cond(input[ptr + n])) return false
@@ -58,7 +58,7 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
                     ${" ".repeat(token.column - 1)}^ here
                 """.trimIndent()
 
-                throw ParseException(header + context, token)
+                lexingErrors += ParseException(header + context, token)
             }
         }
 
@@ -80,9 +80,15 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
             }
             else -> when (c) {
                 '\t', '\r', ' ' -> { /* ignore whitespace */ }
-                '\'' -> skip('\n')
+                '\'' -> {
+                    val comment = takeWhile { it != '\n' }.removePrefix("'").trim()
+                    token(EOLToken(comment))
+                    ptr++
+                    line++
+                    lineStart = ptr + 1
+                }
                 '\n' -> {
-                    token(NewLineToken)
+                    token(EOLToken())
                     line++
                     lineStart = ptr + 1
                 }
@@ -105,11 +111,17 @@ fun lexer(input: String, language: Language = EnglishLanguage): List<Token> {
                 }
                 ';' -> conditionalToken(ParameterSeparatorToken, groupStack.isNotEmpty(), "; outside of parentheses")
                 ':' -> conditionalToken(AssignmentToken, match('='), ": without = (assignment operator)")
-                else -> conditionalToken(InvalidToken, false, "character not allowed for identifiers")
+                else -> conditionalToken(InvalidToken, false, "illegal identifier")
             }
         }
 
         ptr++
+    }
+
+    if (lexingErrors.isNotEmpty()) {
+        val target = ParseFailedException("Lexing failed: ${lexingErrors.size} errors were found")
+        lexingErrors.forEach { target.addSuppressed(it) }
+        throw target
     }
 
     return result
@@ -123,8 +135,20 @@ data class Token(
 )
 
 sealed interface TokenInfo
+val TokenInfo.humanReadable get() = when (this) {
+    AssignmentToken -> "assignment"
+    is BinaryOperatorToken -> "binary operator"
+    is EOLToken -> "end-of-line"
+    EqualsToken -> "equals"
+    is GroupToken -> "group"
+    is Identifier -> "identifier"
+    InvalidToken -> "invalid token"
+    NotToken -> "unary not"
+    is NumberToken -> "number literal"
+    ParameterSeparatorToken -> "separator"
+}
 
-data object NewLineToken : TokenInfo
+data class EOLToken(val comment: String? = null) : TokenInfo
 data object AssignmentToken : TokenInfo
 data object InvalidToken : TokenInfo
 data object NotToken : TokenInfo
@@ -136,3 +160,26 @@ data object EqualsToken : TokenInfo
 data class NumberToken(val value: Float) : TokenInfo
 data class BinaryOperatorToken(val operator: String) : TokenInfo
 data class GroupToken(val tokens: List<Token>) : TokenInfo
+
+fun List<Token>.find(line: Int, char: Int): Token? {
+    var min = 0
+    var max = lastIndex
+
+    while (min <= max) {
+        val pivot = (min + max) / 2
+        val target = this[pivot]
+
+        when {
+            target.line == line -> when {
+                target.column > char -> max = pivot - 1
+                char in target.column..<target.column + target.lexeme.length -> return target
+                else -> min = pivot + 1
+            }
+
+            target.line < line -> min = pivot + 1
+            else -> max = pivot - 1
+        }
+    }
+
+    return null
+}

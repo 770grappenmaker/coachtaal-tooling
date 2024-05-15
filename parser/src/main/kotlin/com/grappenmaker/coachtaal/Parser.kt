@@ -20,7 +20,7 @@ inline fun <reified V : Any, T> Iterable<T>.partitionIs(): Pair<List<V>, List<T>
 }
 
 fun parseProgram(contents: String, language: Language): ParsedProgram {
-    val parser = Parser(lexer(contents), language, contents)
+    val parser = Parser(lexer(contents, language), language, contents)
     val (functions, lines) = parser.parseFull().partitionIs<FunctionExpr, _>()
     parser.validateFunctions(functions)
     return ParsedProgram(lines, functions, language)
@@ -32,11 +32,13 @@ fun parseExpression(
     originalCode: String? = null,
 ) = parseSingle(tokens, language, originalCode) { compare().also { it.assertNoFunctions() } }
 
+fun List<Token>.isPracticallyEmpty() = all { it.info is EOLToken }
+
 fun parseBlock(
     tokens: List<Token>,
     language: Language,
     originalCode: String? = null
-) = if (tokens.isEmpty()) emptyList() else parseSingle(tokens, language, originalCode) {
+) = if (tokens.isPracticallyEmpty()) emptyList() else parseSingle(tokens, language, originalCode) {
     parseFull().also { it.assertNoFunctions() }
 }
 
@@ -68,7 +70,7 @@ fun Expr.humanFriendly() = when (this) {
     is UnaryMinusExpr -> "unary minus expression"
     is WhileExpr -> "while expression"
     is FunctionExpr -> "function \"${name.value}\" expression"
-    is NewLineExpr -> "new line"
+    is EOLExpr -> "new line"
 }
 
 class Parser(
@@ -77,6 +79,7 @@ class Parser(
     private val originalCode: String? = null,
 ) {
     private val caughtErrors = mutableListOf<ParseException>()
+    private val uncollectedEOLs = mutableListOf<EOLToken>()
     var ptr = 0
     val isAtEnd get() = ptr !in tokens.indices
 
@@ -91,7 +94,11 @@ class Parser(
     // Returns the current token and goes to the next
     private fun take(expectedMessage: String? = null, skipNewLine: Boolean = true): Token {
         eofError(expectedMessage)
-        while (skipNewLine && tokens[ptr].info is NewLineToken) {
+        while (skipNewLine) {
+            val info = tokens[ptr].info
+            if (info !is EOLToken) break
+
+            uncollectedEOLs += info
             advance()
             eofError(expectedMessage)
         }
@@ -107,7 +114,7 @@ class Parser(
 
         // Do not want to alter state, use temporary variable
         var tempPtr = ptr
-        while (skipNewLine && tokens[tempPtr].info is NewLineToken && tempPtr + 1 in tokens.indices) tempPtr++
+        while (skipNewLine && tokens[tempPtr].info is EOLToken && tempPtr + 1 in tokens.indices) tempPtr++
         return tokens[tempPtr]
     }
 
@@ -166,10 +173,13 @@ class Parser(
     }.toList()
 
     // Skips all newlines
-    private inline fun skipNewLine(onEach: () -> Unit = {}) {
-        while (!isAtEnd && tokens[ptr].info is NewLineToken) {
+    private fun skipNewLine() {
+        while (!isAtEnd) {
+            val info = tokens[ptr].info
+            if (info !is EOLToken) break
+
+            uncollectedEOLs += info
             advance()
-            onEach()
         }
     }
 
@@ -354,23 +364,38 @@ class Parser(
     }
 
     private fun recover() {
-        takeWhile(skipNewLine = false) { it !is NewLineToken }
+        takeWhile(skipNewLine = false) { it !is EOLToken }
     }
 
-    fun parseFull() = if (tokens.isEmpty()) emptyList() else buildList {
-        skipNewLine()
+    fun MutableList<Expr>.addEOLs() {
+        addAll(uncollectedEOLs.map { EOLExpr(it.comment) })
+        uncollectedEOLs.clear()
+    }
+
+    fun endOfStatement(statement: Expr) {
+        if (isAtEnd) return
+
+        val curr = tokens[ptr]
+        val info = curr.info
+        if (info !is EOLToken) {
+            unexpected(curr, "after statement \"${statement.humanFriendly()}\", expected newline")
+        }
+
+        if (info.comment == null) advance()
+    }
+
+    fun parseFull() = if (tokens.isPracticallyEmpty()) emptyList() else buildList {
+        this@Parser.takeWhile { it is EOLToken && it.comment == null }
 
         while (!isAtEnd) {
             try {
                 val newStatement = statement()
+                addEOLs()
                 add(newStatement)
+                endOfStatement(newStatement)
 
-                if (!isAtEnd && tokens[ptr].info !is NewLineToken) {
-                    unexpected(tokens[ptr], "after statement \"${newStatement.humanFriendly()}\", expected newline")
-                }
-
-                advance()
-                skipNewLine { add(NewLineExpr) }
+                skipNewLine()
+                addEOLs()
             } catch (e: ParseException) {
                 caughtErrors += e
                 recover()
@@ -406,7 +431,7 @@ class Parser(
     private fun findOperator(info: BinaryOperatorToken) = binaryOperators.getValue(info.operator)
 
     private fun unexpected(token: Token, extra: String? = null): Nothing {
-        val header = "Unexpected token ${token.info.javaClass.simpleName} " +
+        val header = "Unexpected token ${token.info.humanReadable} " +
                 "at line ${token.line}, column ${token.column}, \"${token.lexeme}\"" +
                 if (extra != null) ": $extra" else ""
 
@@ -546,7 +571,7 @@ data class FunctionExpr(
 }
 
 // Fake expr lol
-data object NewLineExpr : Expr {
+data class EOLExpr(val comment: String? = null) : Expr {
     override fun eval(interpreter: Interpreter, scope: MutableMap<String, Float>) = ExprResult.None
 }
 
@@ -586,3 +611,37 @@ fun Expr.extractVariables(language: Language = DutchLanguage): Set<Identifier> =
     is WhileExpr -> condition.extractVariables(language) + body.extractVariables(language)
     else -> emptySet()
 }
+
+fun Identifier.renameReference(from: String, to: String) = if (value == from) Identifier(to) else this
+
+fun Expr.renameReference(from: String, to: String): Expr = when (this) {
+    is AssignmentExpr -> copy(left = left.renameReference(from, to), right = right.renameReference(from, to))
+    is BinaryOperatorExpr -> copy(left = left.renameReference(from, to), right = right.renameReference(from, to))
+    is CallExpr -> copy(name = name.renameReference(from, to), arguments = arguments.renameReference(from, to))
+    is ConditionalExpr -> copy(
+        condition = condition.renameReference(from, to),
+        whenTrue = whenTrue.renameReference(from, to),
+        whenFalse = whenFalse?.renameReference(from, to),
+    )
+
+    is FunctionExpr -> error("Should not appear here??")
+    is IdentifierExpr -> copy(value = value.renameReference(from, to))
+    is NotExpr -> copy(on = on.renameReference(from, to))
+    is RepeatUntilExpr -> copy(condition = condition.renameReference(from, to), body = body.renameReference(from, to))
+    is RepeatingExpr -> copy(repetitions = repetitions.renameReference(from, to), body = body.renameReference(from, to))
+    is UnaryMinusExpr -> copy(on = on.renameReference(from, to))
+    is WhileExpr -> copy(condition = condition.renameReference(from, to), body = body.renameReference(from, to))
+    else -> this
+}
+
+fun List<Expr>.renameReference(from: String, to: String) = map { it.renameReference(from, to) }
+
+fun ParsedProgram.renameReference(from: String, to: String) = copy(
+    lines = lines.renameReference(from, to),
+    functions = functions.map {
+        it.copy(
+            name = it.name.renameReference(from, to),
+            body = it.body.renameReference(from, to)
+        )
+    }
+)

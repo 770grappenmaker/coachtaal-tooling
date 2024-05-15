@@ -256,7 +256,7 @@ private fun Expr.remainingStackHeight(language: Language) = when (this) {
     is BinaryOperatorExpr, is IdentifierExpr, is LiteralExpr, is NotExpr, is UnaryMinusExpr -> 1
     // body gets ironed out anyway, should be 0
     is AssignmentExpr, is ConditionalExpr, is RepeatUntilExpr,
-    is RepeatingExpr, is WhileExpr, is FunctionExpr, is NewLineExpr -> 0
+    is RepeatingExpr, is WhileExpr, is FunctionExpr, is EOLExpr -> 0
 }
 
 private fun MethodVisitor.popRemaining(expr: Expr, language: Language) {
@@ -580,7 +580,7 @@ private fun MethodVisitor.compile(
         }
 
         is FunctionExpr -> error("Function expression should not have propagated down to the compiler within a body!")
-        NewLineExpr -> {}
+        is EOLExpr -> {}
     }
 }
 

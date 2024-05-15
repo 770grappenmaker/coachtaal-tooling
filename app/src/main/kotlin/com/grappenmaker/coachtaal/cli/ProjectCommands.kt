@@ -1,6 +1,7 @@
 package com.grappenmaker.coachtaal.cli
 
 import com.grappenmaker.coachtaal.*
+import com.grappenmaker.coachtaal.Project
 import java.nio.file.Path
 import kotlin.io.path.*
 import kotlin.random.Random
@@ -18,14 +19,12 @@ object FormatProject : Command() {
     override val name = "format"
     override val aliases = setOf("f")
 
-    private fun format(path: Path, language: Language) =
-        path.writeText(parseProgram(path.readText(), language).asText())
+    private fun Project.format(path: Path) =
+        path.writeText(parseProgram(path.readText(), config.language.underlying).asText(formatter))
 
-    override fun invoke(args: List<String>) {
-        val proj = cwd.loadProject()
-        val lang = proj.config.language.underlying
-        format(proj.initScriptPath, lang)
-        format(proj.iterScriptPath, lang)
+    override fun invoke(args: List<String>) = with(cwd.loadProject()) {
+        format(initScriptPath)
+        format(iterScriptPath)
     }
 }
 
@@ -42,7 +41,7 @@ object TranslateProject : Command() {
         val toLang = to[args]
         fun translate(path: Path) {
             val parsed = parseProgram(path.readText(), from)
-            path.writeText(parsed.copy(language = toLang.underlying).asText())
+            path.writeText(parsed.copy(language = toLang.underlying).asText(proj.formatter))
         }
 
         translate(proj.initScriptPath)

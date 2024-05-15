@@ -4,6 +4,7 @@ gdx = "1.11.0"
 ktx = "1.11.0-rc3"
 lsp4j = "0.22.0"
 coroutines = "1.8.1"
+kx-ser = "1.6.3"
 
 [libraries]
 kotlin-jvm = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -19,6 +20,9 @@ ktx-collections = { module = "io.github.libktx:ktx-collections", version.ref = "
 ktx-graphics = { module = "io.github.libktx:ktx-graphics", version.ref = "ktx" }
 
 lsp4j = { module = "org.eclipse.lsp4j:org.eclipse.lsp4j", version.ref = "lsp4j" }
+
+ser-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kx-ser" }
+ser-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kx-ser" }
 
 [bundles]
 kotlin = ["kotlin-jvm", "kotlin-serialization"]

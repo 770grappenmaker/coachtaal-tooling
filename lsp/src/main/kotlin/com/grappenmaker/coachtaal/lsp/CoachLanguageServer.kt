@@ -8,7 +8,11 @@ import kotlinx.coroutines.future.future
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.CompletionItemKind.*
 import org.eclipse.lsp4j.CompletionItemKind.Function
+import org.eclipse.lsp4j.jsonrpc.ResponseErrorException
 import org.eclipse.lsp4j.jsonrpc.messages.Either
+import org.eclipse.lsp4j.jsonrpc.messages.Either3
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseError
+import org.eclipse.lsp4j.jsonrpc.messages.ResponseErrorCode
 import org.eclipse.lsp4j.launch.LSPLauncher
 import org.eclipse.lsp4j.services.*
 import java.net.URI
@@ -32,6 +36,7 @@ internal val tokensLegend = SemanticTokensLegend(
         SemanticTokenTypes.Variable,
         SemanticTokenTypes.Number,
         SemanticTokenTypes.Operator,
+        SemanticTokenTypes.Comment,
     ),
     listOf(
         SemanticTokenModifiers.DefaultLibrary,
@@ -56,10 +61,9 @@ object CoachLanguageServer : LanguageServer, LanguageClientAware {
                     true,
                     false
                 )
-//                hoverProvider = Either.forLeft(true)
-//                signatureHelpProvider = SignatureHelpOptions(listOf("(", ";"))
-//                definitionProvider = Either.forLeft(true)
-//                documentSymbolProvider = Either.forLeft(true)
+
+                renameProvider = Either.forRight(RenameOptions(true))
+                hoverProvider = Either.forLeft(true)
             },
             ServerInfo(serverName, serverVersion)
         )
@@ -73,8 +77,27 @@ object CoachLanguageServer : LanguageServer, LanguageClientAware {
 
     override fun connect(client: LanguageClient) {
         if (::client.isInitialized) error("LSP can only be connected to and be initialized once in its lifetime!")
+
         this.client = client
         client.showMessage(MessageParams(MessageType.Info, "$serverName connected successfully!"))
+        client.registerCapability(
+            RegistrationParams(
+                listOf(
+                    Registration(
+                        "coach-default-watch",
+                        "workspace.didChangeWatchedFiles",
+                        DidChangeWatchedFilesRegistrationOptions(
+                            listOf(
+                                FileSystemWatcher(Either.forLeft(coachIterFileName)),
+                                FileSystemWatcher(Either.forLeft(coachInitFileName)),
+                                FileSystemWatcher(Either.forLeft(coachProjectFileName)),
+                                FileSystemWatcher(Either.forLeft(coachFormatterFileName)),
+                            )
+                        )
+                    )
+                )
+            )
+        )
     }
 }
 
@@ -108,12 +131,14 @@ data class DocumentState(
             coach -> {
                 if (!CoachTextDocuments.hasLoadedConfig) {
                     forceUpdateURI(uri.toPath().resolveSibling(coachProjectFileName).toUri())
+                    forceUpdateURI(uri.toPath().resolveSibling(coachFormatterFileName).toUri())
                 }
 
                 sendDiagnostics()
             }
 
             uri.path.endsWith(coachProjectFileName) -> CoachTextDocuments.updateConfig(this)
+            uri.path.endsWith(coachFormatterFileName) -> CoachTextDocuments.updateFormatter(this)
         }
     }
 
@@ -164,12 +189,20 @@ data class DocumentState(
         Position(lines.lastIndex, lines.last().length)
     )
 
-    fun format(): List<TextEdit>? {
+    fun format(tabSize: Int): List<TextEdit>? {
         if (!coach) return null
 
         val parsed = tryParse().getOrNull() ?: return null
         val optimized = if (CoachTextDocuments.config.optimize) parsed.optimize() else parsed
-        return listOf(TextEdit(fullRange(), optimized.asText()))
+        return listOf(TextEdit(fullRange(), optimized.asText(CoachTextDocuments.formatter.copy(indent = tabSize))))
+    }
+
+    fun renameReference(from: String, to: String): List<TextEdit>? {
+        if (!coach) return null
+
+        val parsed = tryParse().getOrNull() ?: return null
+        val updated = parsed.renameReference(from, to)
+        return listOf(TextEdit(fullRange(), updated.asText(CoachTextDocuments.formatter)))
     }
 }
 
@@ -215,16 +248,19 @@ sealed interface TryParseResult {
     }
 }
 
+fun String.deduplicatableURI(): URI = URI(this).toPath().toUri()
+
 object CoachTextDocuments : TextDocumentService {
     val sources = mutableMapOf<URI, DocumentState>()
     val hasLoadedConfig get() = sources.keys.any { it.path.endsWith(coachProjectFileName) }
     val coachSources get() = sources.values.filter { it.coach }
 
     var config = ProjectConfig()
+    var formatter = FormatterConfig()
 
     override fun didOpen(params: DidOpenTextDocumentParams) {
         DocumentState(
-            URI(params.textDocument.uri),
+            params.textDocument.uri.deduplicatableURI(),
             params.textDocument.text.lines(),
             params.textDocument.version
         ).register()
@@ -250,7 +286,7 @@ object CoachTextDocuments : TextDocumentService {
     }
 
     override fun didClose(params: DidCloseTextDocumentParams) {
-        sources -= URI(params.textDocument.uri)
+        sources -= params.textDocument.uri.deduplicatableURI()
     }
 
     override fun didSave(params: DidSaveTextDocumentParams) {
@@ -258,14 +294,20 @@ object CoachTextDocuments : TextDocumentService {
         if (params.text != null) state.update { copy(lines = params.text.lines()) }
     }
 
-    private fun getState(uri: String) = sources[URI(uri)] ?: error("Invalid document $uri")
+    private fun getState(uri: String) = sources[uri.deduplicatableURI()] ?: error("Invalid document $uri")
 
     override fun formatting(params: DocumentFormattingParams): CompletableFuture<List<TextEdit>> =
-        CoachLanguageServer.scope.future { getState(params.textDocument.uri).format() ?: emptyList() }
+        CoachLanguageServer.scope.future {
+            getState(params.textDocument.uri).format(params.options.tabSize) ?: emptyList()
+        }
 
     fun updateConfig(state: DocumentState) {
         config = state.lines.joinToString("\n").decodeProjectConfig()
         sources.values.filter { it.coach }.forEach { it.sendDiagnostics() }
+    }
+
+    fun updateFormatter(state: DocumentState) {
+        formatter = state.lines.joinToString("\n").decodeFormatterConfig()
     }
 
     private fun snippet(label: String, text: String) = CompletionItem(label).apply {
@@ -292,8 +334,10 @@ object CoachTextDocuments : TextDocumentService {
     override fun completion(
         position: CompletionParams
     ): CompletableFuture<Either<List<CompletionItem>, CompletionList>> = CoachLanguageServer.scope.future {
-        val lang = config.language.underlying
+        val state = getState(position.textDocument.uri)
+        if (!state.coach) return@future Either.forLeft(emptyList())
 
+        val lang = config.language.underlying
         val snippets = listOf(
             snippet(
                 "if-statement", """
@@ -342,7 +386,7 @@ object CoachTextDocuments : TextDocumentService {
         )
 
         val completions = if (hasLoadedConfig) coachSources.flatMap { it.completion() }.distinct()
-        else getState(position.textDocument.uri).completion()
+        else state.completion()
 
         val builtinFunctions = lang.builtinFunctions.map { CompletionItem(it).apply { kind = Function } }
         val builtinConstants = lang.builtinConstants.map { CompletionItem(it).apply { kind = Constant } }
@@ -354,9 +398,11 @@ object CoachTextDocuments : TextDocumentService {
         params: SemanticTokensParams
     ): CompletableFuture<SemanticTokens> = CoachLanguageServer.scope.future {
         val state = getState(params.textDocument.uri)
+        if (!state.coach) return@future SemanticTokens()
+
         val lang = config.language.underlying
         val file = state.lines.joinToString("\n")
-        val lexed = lexer(file) // TODO: error handling
+        val lexed = lexer(file, lang)
         val flatTokens = lexed.flatMap {
             val info = it.info
             if (info is GroupToken) info.tokens else listOf(it)
@@ -374,7 +420,9 @@ object CoachTextDocuments : TextDocumentService {
                     in lang.builtinFunctions -> SemanticTokenTypes.Function
                     else -> SemanticTokenTypes.Variable
                 }
+
                 is NumberToken -> SemanticTokenTypes.Number
+                is EOLToken -> if (info.comment != null) SemanticTokenTypes.Comment else return@mapNotNull null
                 else -> return@mapNotNull null
             }
 
@@ -385,6 +433,7 @@ object CoachTextDocuments : TextDocumentService {
                         !in variables -> setOf(SemanticTokenModifiers.Readonly)
                         else -> setOf()
                     }
+
                 else -> setOf()
             }
 
@@ -392,6 +441,60 @@ object CoachTextDocuments : TextDocumentService {
         }
 
         SemanticTokens(result.encodeRelative())
+    }.exceptionally { SemanticTokens(emptyList()) }
+
+    private fun cannotRename(): Nothing = throw ResponseErrorException(
+        ResponseError(
+            ResponseErrorCode.InvalidParams,
+            "This element can't be renamed",
+            null
+        )
+    )
+
+    override fun prepareRename(
+        params: PrepareRenameParams
+    ): CompletableFuture<Either3<Range, PrepareRenameResult, PrepareRenameDefaultBehavior>> =
+        CoachLanguageServer.scope.future {
+            val state = getState(params.textDocument.uri)
+            val lexed = lexer(state.lines.joinToString("\n"), config.language.underlying)
+            val tl = params.position.line + 1
+            val tc = params.position.character + 1
+
+            val token = lexed.find(tl, tc) ?: cannotRename()
+            val info = token.info as? Identifier ?: cannotRename()
+
+            Either3.forSecond(
+                PrepareRenameResult(
+                    Range(
+                        Position(token.line - 1, token.column - 1),
+                        Position(token.line - 1, token.column + token.lexeme.length - 2)
+                    ),
+                    info.value
+                )
+            )
+        }
+
+    fun DocumentState.findToken(position: Position): Token? {
+        if (!coach) return null
+
+        val lexed = lexer(lines.joinToString("\n"), config.language.underlying)
+        return lexed.find(position.line + 1, position.character + 1)
+    }
+
+    override fun rename(params: RenameParams): CompletableFuture<WorkspaceEdit> = CoachLanguageServer.scope.future {
+        val state = getState(params.textDocument.uri)
+        val token = state.findToken(params.position) ?: return@future WorkspaceEdit()
+        val info = token.info as? Identifier ?: return@future WorkspaceEdit()
+
+        WorkspaceEdit(coachSources.mapNotNull { doc ->
+            doc.uri.toString() to (doc.renameReference(info.value, params.newName) ?: return@mapNotNull null)
+        }.toMap())
+    }
+
+    override fun hover(params: HoverParams): CompletableFuture<Hover> = CoachLanguageServer.scope.future {
+        val state = getState(params.textDocument.uri)
+        val token = state.findToken(params.position) ?: return@future Hover(emptyList())
+        Hover(Either.forLeft("${token.info.humanReadable} '${token.lexeme}'"))
     }
 }
 
