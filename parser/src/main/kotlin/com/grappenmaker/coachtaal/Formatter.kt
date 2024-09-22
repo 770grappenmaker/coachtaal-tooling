@@ -44,7 +44,9 @@ context(FormatterContext)
 private fun String.indent() = lines().joinToString(newLine) { indentString + it }
 
 val Language.locale: Locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
-fun Language.formatConstant(cst: Float): String = DecimalFormat.getNumberInstance(locale).format(cst)
+fun Language.formatConstant(cst: Float): String = DecimalFormat.getNumberInstance(locale)
+    .apply { maximumFractionDigits = 6 }
+    .format(cst)
 
 // TODO: translation
 context(FormatterContext)
