@@ -9,7 +9,7 @@ repositories {
     mavenCentral()
 }
 
-kotlin { jvmToolchain(17) }
+kotlin { jvmToolchain(8) }
 
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions { freeCompilerArgs.add("-Xcontext-receivers") }
