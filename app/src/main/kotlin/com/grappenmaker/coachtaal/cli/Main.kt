@@ -8,7 +8,12 @@ import kotlin.reflect.KProperty
 import kotlin.system.exitProcess
 
 object RootCommand : CommandHolding() {
-    override val subCommands = listOf(Init, Project, Visualize, CSV, Format, Translate, Compile, RunCompiled, Parse, Tokenize)
+    override val subCommands = listOf(
+        Init, Project, Visualize, CSV, Format,
+        Translate, Compile, RunCompiled, Parse, Tokenize,
+        ExerciseCommand
+    )
+
     override val name get() = error("The root command does not have a name!")
     override val aliases = emptySet<String>()
 }
@@ -54,9 +59,17 @@ fun loadCliModel(
     language: Language,
     compile: Boolean,
     optimize: Boolean = true
+) = loadCliModel(programPath.readText(), initialPath.readText(), language, compile, optimize)
+
+fun loadCliModel(
+    programCode: String,
+    initialCode: String,
+    language: Language,
+    compile: Boolean,
+    optimize: Boolean = true
 ): CliModel {
-    val program = parseProgram(programPath.readText(), language)
-    val initial = parseProgram(initialPath.readText(), language)
+    val program = parseProgram(programCode, language)
+    val initial = parseProgram(initialCode, language)
     val (popt, iopt) = if (optimize) program.optimizeWithInit(initial) else program to initial
 
     return CliModel(

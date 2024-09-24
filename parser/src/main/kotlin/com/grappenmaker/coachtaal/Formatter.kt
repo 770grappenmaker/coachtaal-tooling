@@ -46,17 +46,45 @@ private fun String.indent() = lines().joinToString(newLine) { indentString + it 
 val Language.locale: Locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
 fun Language.formatConstant(cst: Float): String = DecimalFormat.getNumberInstance(locale).format(cst)
 
-// TODO: translation
+// TODO: DRY
+private val operatorPriorities = listOf(
+    setOf("^"),
+    setOf("*", "/", "&&"),
+    setOf("+", "-", "||"),
+    setOf("=", "<>", "<", ">", "<=", ">=")
+)
+
+private val operatorToPriotity = operatorPriorities.flatMapIndexed { idx, v -> v.map { it to idx } }.toMap()
+
+private val BinaryOperatorExpr.priority get() = operatorToPriotity.getValue(operatorToken)
+
 context(FormatterContext)
-fun Expr.asText(): String = when (this) {
-    is AssignmentExpr -> "${left.value} $assignmentString ${right.asText()}"
-    is BinaryOperatorExpr -> "${left.asText()} ${
+fun BinaryOperatorExpr.format(): String {
+    val prio = priority
+    val lhs = when {
+        left is BinaryOperatorExpr -> if (left.priority > prio) "(${left.format()})" else left.format()
+        else -> left.asText()
+    }
+
+    val rhs = when {
+        right is BinaryOperatorExpr -> if (right.priority > prio) "(${right.format()})" else right.format()
+        else -> right.asText()
+    }
+
+    return "$lhs ${
         when (operatorToken) {
             "&&" -> language.andOperator
             "||" -> language.orOperator
             else -> operatorToken
         }
-    } ${right.asText()}"
+    } $rhs"
+}
+
+// TODO: translation
+context(FormatterContext)
+fun Expr.asText(): String = when (this) {
+    is AssignmentExpr -> "${left.value} $assignmentString ${right.asText()}"
+    is BinaryOperatorExpr -> format()
 
     is CallExpr -> name.value +
             if (arguments.isNotEmpty()) "(${arguments.joinToString(";") { it.asText() }})" else ""

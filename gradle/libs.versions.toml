@@ -1,5 +1,5 @@
 [versions]
-kotlin = "2.0.0-RC2"
+kotlin = "2.0.0"
 gdx = "1.11.0"
 ktx = "1.11.0-rc3"
 lsp4j = "0.22.0"

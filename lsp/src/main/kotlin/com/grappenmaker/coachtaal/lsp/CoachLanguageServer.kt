@@ -394,6 +394,11 @@ object CoachTextDocuments : TextDocumentService {
         Either.forLeft(completions + builtinFunctions + keywords + builtinConstants + snippets)
     }
 
+    private fun List<Token>.flattenGroups(): List<Token> = flatMap {
+        val info = it.info
+        if (info is GroupToken) info.tokens.flattenGroups() else listOf(it)
+    }
+
     override fun semanticTokensFull(
         params: SemanticTokensParams
     ): CompletableFuture<SemanticTokens> = CoachLanguageServer.scope.future {
@@ -403,10 +408,7 @@ object CoachTextDocuments : TextDocumentService {
         val lang = config.language.underlying
         val file = state.lines.joinToString("\n")
         val lexed = lexer(file, lang)
-        val flatTokens = lexed.flatMap {
-            val info = it.info
-            if (info is GroupToken) info.tokens else listOf(it)
-        }
+        val flatTokens = lexed.flattenGroups()
 
         val variables = runCatching { parseProgram(file, lang).findNonConstant() }
             .getOrElse { setOf() }
