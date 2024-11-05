@@ -1,10 +1,10 @@
 [versions]
 kotlin = "2.0.0"
 gdx = "1.11.0"
-ktx = "1.11.0-rc3"
+ktx = "1.12.1-rc2"
 lsp4j = "0.22.0"
-coroutines = "1.8.1"
-kx-ser = "1.6.3"
+coroutines = "1.9.0"
+kx-ser = "1.7.1"
 
 [libraries]
 kotlin-jvm = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
