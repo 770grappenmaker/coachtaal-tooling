@@ -17,7 +17,7 @@
     {
 	  packages = forEachSupportedSystem({ pkgs }: with pkgs; {
 		  default = (let
-			  buildMavenRepo = callPackage ./maven-repo.nix { };
+			  buildMavenRepo = callPackage ./nix/maven-repo.nix { };
 
 			  mavenRepo = buildMavenRepo {
 				name = "nix-maven-repo";
@@ -72,7 +72,7 @@
           packages = with pkgs; [
             gradle
             kotlin
-			(pkgs.callPackage ./update-locks.nix {})
+			(pkgs.callPackage ./nix/update-locks.nix {})
           ];
         };
       });
