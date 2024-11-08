@@ -1,5 +1,5 @@
 plugins {
-    id("kotlin")
+	kotlin("jvm")
     kotlin("plugin.serialization")
     application
 }

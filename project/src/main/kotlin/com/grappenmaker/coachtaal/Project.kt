@@ -3,7 +3,6 @@ package com.grappenmaker.coachtaal
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import org.objectweb.asm.ClassReader
 import java.nio.file.Path
 import java.security.MessageDigest
 import kotlin.io.path.*
@@ -34,12 +33,6 @@ fun Path.loadProject() = Project(
     projectConfig().jsonOrEmpty(),
     formatterConfig().jsonOrEmpty()
 ).also { it.createDirectories() }
-
-inline fun <reified T : ModelRunner> Path.loadCompiledModel(): ModelRunner {
-    val bytes = readBytes()
-    val reader = ClassReader(bytes)
-    return loadCompiledModel<T>(reader.className.replace('/', '.'), bytes)
-}
 
 data class Project(
     val dir: Path,

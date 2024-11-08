@@ -1,9 +1,22 @@
 rootProject.name = "coachtaal-tooling"
 
-includeBuild("nasty-jvm-util") {
-    dependencySubstitution {
-        substitute(module("com.grappenmaker:nasty-jvm-util")).using(project(":"))
+pluginManagement {
+    repositories {
+        System.getenv()["NIX_MAVEN_REPO"]?.let {
+            mavenLocal {
+                url = uri(it)
+                metadataSources {
+                    mavenPom()
+                    gradleMetadata()
+                }
+            }
+        }
+            ?: run {
+                mavenCentral()
+                gradlePluginPortal()
+            }
     }
 }
 
 include("parser", "app", "lsp", "project")
+

@@ -55,66 +55,6 @@ object Tokenize : Command() {
         lexer(Path(program[args]).readText(), language[args].underlying).forEach { println(it) }
 }
 
-object Compile : Command() {
-    override val name = "compile"
-    override val aliases = setOf("c")
-
-    private val program by string()
-    private val initial by string()
-    private val language by enum<EnumLanguage>()
-    private val output by optionalString("compiled${Random.nextUInt()}.class")
-
-    override fun invoke(args: List<String>) {
-        val actualLanguage = language[args].underlying
-
-        genericCompile(
-            actualLanguage,
-            parseProgram(Path(program[args]).readText(), actualLanguage),
-            parseProgram(Path(initial[args]).readText(), actualLanguage),
-            output[args]
-        )
-    }
-}
-
-fun genericCompile(
-    language: Language,
-    program: ParsedProgram,
-    init: ParsedProgram,
-    className: String,
-    relative: Path = cwd,
-    optimize: Boolean = true,
-) {
-    val (popt, iopt) = if (optimize) program.optimizeWithInit(init) else program to init
-
-    val output = relative.resolve(className)
-    output.createParentDirectories()
-
-    val bytes = compileModel(className.removeSuffix(".class"), popt, iopt, language, runnable = true)
-    output.writeBytes(bytes)
-}
-
-fun genericRunCompiled(path: Path, runs: Int) {
-    val model = path.loadCompiledModel<ModelRunner>()
-    val time = measureTimeMillis {
-        repeat(runs) {
-            model.run()
-            model.reset()
-        }
-    }
-
-    println("Took ${time}ms")
-}
-
-object RunCompiled : Command() {
-    override val name = "runcompiled"
-    override val aliases = setOf("rc")
-
-    private val path by string()
-    private val runs by optionalInt(1)
-
-    override fun invoke(args: List<String>) = genericRunCompiled(Path(path[args]), runs[args])
-}
-
 object Visualize : Command() {
     override val name = "visualize"
     override val aliases = setOf("v")
@@ -130,7 +70,7 @@ object Visualize : Command() {
 
     override fun invoke(args: List<String>) {
         genericVisualize(
-            loadCliModel(Path(program[args]), Path(initial[args]), language[args].underlying, compile[args]).runner,
+            loadCliModel(Path(program[args]), Path(initial[args]), language[args].underlying).runner,
             xVariable[args],
             yVariable[args],
             lineThickness[args],
@@ -181,8 +121,7 @@ object CSV : Command() {
         println(genericCSV(loadCliModel(
             Path(program[args]),
             Path(initial[args]),
-            language[args].underlying,
-            compile[args]
+            language[args].underlying
         )))
     }
 }

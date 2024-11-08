@@ -3,65 +3,76 @@
 
   inputs = {
   nixpkgs.url = "github:NixOS/nixpkgs/9b5328b7f761a7bbdc0e332ac4cf076a3eedb89b";
-  build-gradle-application.url = "github:dtomvan/buildGradleApplication";
-  nasty-jvm-util = {
-	  url = "git+file:nasty-jvm-util";
-	  flake = false;
-  };
   };
 
-  outputs = { self, nixpkgs, build-gradle-application, nasty-jvm-util }:
+  outputs = { self, nixpkgs, ... }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
         pkgs = import nixpkgs {
 			inherit system;
-			overlays = [
-				build-gradle-application.overlays.default
-			];
 		};
       });
     in
     {
 	  packages = forEachSupportedSystem({ pkgs }: with pkgs; {
-		  default = (buildGradleApplication {
+		  default = (let
+  buildMavenRepo = callPackage ./maven-repo.nix { };
+
+  mavenRepo = buildMavenRepo {
+    name = "nix-maven-repo";
+    repos = [
+      "https://repo1.maven.org/maven2"
+      "https://plugins.gradle.org/m2"
+      "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/dev"
+    ];
+    deps = builtins.fromJSON (builtins.readFile ./deps.json);
+  };
+in pkgs.stdenv.mkDerivation {
 			  pname = "coach";
 			  version = "0.1";
 			  src = ./.;
-			  buildTask = "installDist";
-			  dependencyFilter = depSpec:
-# kotlinx-serialization-core-metadata-x.y.z.jar is not uploaded to m2...
-			  !(
-			  (
-				  depSpec.component.group
-				  == "org.jetbrains.kotlinx"
-				  && lib.strings.match ''^kotlinx-serialization-.*-metadata-[0-9]+\.[0-9]+\.[0-9]+\.jar$'' depSpec.name != null
-			  ) ||
-			  (
-				  depSpec.component.group
-				  == "org.jetbrains.kotlinx"
-				  && depSpec.component.name == "atomicfu"
-				  && lib.strings.match ''^atomicfu-metadata-[0-9]+\.[0-9]+\.[0-9]+\.jar$'' depSpec.name != null
-			  )
-			   );
+			  buildInputs = with pkgs; [
+			  jdk
+			  gradle
+			  makeWrapper
+			  ];
+  JDK_HOME = "${jdk.home}";
+
+  buildPhase = ''
+    runHook preBuild
+    export GRADLE_USER_HOME=$TMP/gradle-home
+    export NIX_MAVEN_REPO=${mavenRepo}
+    gradle installDist -x test \
+      --offline --no-daemon \
+      --warning-mode=all --parallel --console=plain \
+      -PnixMavenRepo=${mavenRepo}
+    runHook postBuild
+  '';
+
+  installPhase = ''
+    runHook preInstall
+    mkdir -p $out
+    cp -r app/build/install/coach/* $out
+    wrapProgram $out/bin/coach \
+    --set "JAVA_HOME" "${pkgs.jre_minimal}"
+
+    runHook postInstall
+  '';
+
+  dontStrip = true;
 			  meta = {
 				  description = "Coachtaal compiler";
 			  };
-		  }).overrideAttrs {
-			  configurePhase = ''
-			  set -x
-			  cp -r ${nasty-jvm-util} ./nasty-jvm-util
-			  set +x
-			  '';
-		  };
+		  });
 	  });
 
       devShells = forEachSupportedSystem ({ pkgs }: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-			updateVerificationMetadata
             gradle
             kotlin
+			(pkgs.callPackage ./update-locks.nix {})
           ];
         };
       });

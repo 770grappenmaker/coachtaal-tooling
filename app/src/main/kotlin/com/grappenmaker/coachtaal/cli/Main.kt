@@ -10,7 +10,7 @@ import kotlin.system.exitProcess
 object RootCommand : CommandHolding() {
     override val subCommands = listOf(
         Init, Project, Visualize, CSV, Format,
-        Translate, Compile, RunCompiled, Parse, Tokenize,
+        Translate, Parse, Tokenize,
         ExerciseCommand
     )
 
@@ -57,33 +57,20 @@ fun loadCliModel(
     programPath: Path,
     initialPath: Path,
     language: Language,
-    compile: Boolean,
     optimize: Boolean = true
-) = loadCliModel(programPath.readText(), initialPath.readText(), language, compile, optimize)
+) = loadCliModel(programPath.readText(), initialPath.readText(), language, optimize)
 
 fun loadCliModel(
     programCode: String,
     initialCode: String,
     language: Language,
-    compile: Boolean,
     optimize: Boolean = true
 ): CliModel {
     val program = parseProgram(programCode, language)
     val initial = parseProgram(initialCode, language)
     val (popt, iopt) = if (optimize) program.optimizeWithInit(initial) else program to initial
 
-    return CliModel(
-        program, initial, when {
-            compile -> createCompiledModel<ModelRunner>(
-                compiledName = "$cliCompiledPrefix$cliModelCounter",
-                iter = popt,
-                init = iopt,
-                language = language
-            )
-
-            else -> Interpreter(popt, iopt, language)
-        }
-    )
+    return CliModel(program, initial, Interpreter(popt, iopt, language))
 }
 
 fun String.surround(lr: Pair<String, String>) = lr.first + this + lr.second

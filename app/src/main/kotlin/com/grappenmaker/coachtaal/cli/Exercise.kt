@@ -17,7 +17,7 @@ data class Exercise(
 )
 
 fun Exercise.check(project: Project) {
-    val solutionModel = loadCliModel(iterSolution, initSolution, language.underlying, compile = true)
+    val solutionModel = loadCliModel(iterSolution, initSolution, language.underlying)
     val attemptModel = project.runner()
 
     val solutionResults = solutionModel.runner.run(variables)

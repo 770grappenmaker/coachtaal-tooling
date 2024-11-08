@@ -1,86 +1,6 @@
 {
   "nodes": {
-    "build-gradle-application": {
-      "inputs": {
-        "flake-parts": "flake-parts",
-        "nixpkgs": "nixpkgs"
-      },
-      "locked": {
-        "lastModified": 1730822921,
-        "narHash": "sha256-6LMrkgsuooa2V+lQPmolmLkUslUrdu9dGRc+8V9FDDs=",
-        "owner": "dtomvan",
-        "repo": "buildGradleApplication",
-        "rev": "e8347972d4991799675592adda326059a48c9978",
-        "type": "github"
-      },
-      "original": {
-        "owner": "dtomvan",
-        "repo": "buildGradleApplication",
-        "type": "github"
-      }
-    },
-    "flake-parts": {
-      "inputs": {
-        "nixpkgs-lib": "nixpkgs-lib"
-      },
-      "locked": {
-        "lastModified": 1717285511,
-        "narHash": "sha256-iKzJcpdXih14qYVcZ9QC9XuZYnPc6T8YImb6dX166kw=",
-        "owner": "hercules-ci",
-        "repo": "flake-parts",
-        "rev": "2a55567fcf15b1b1c7ed712a2c6fadaec7412ea8",
-        "type": "github"
-      },
-      "original": {
-        "id": "flake-parts",
-        "type": "indirect"
-      }
-    },
-    "nasty-jvm-util": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1716989250,
-        "narHash": "sha256-Oa8yEBbpea0LEwlDViAt3Ky75jrc1Kg9VeA600mF+do=",
-        "ref": "refs/heads/main",
-        "rev": "9e65401467d1cf5fcc5223787b39df5097059538",
-        "revCount": 16,
-        "type": "git",
-        "url": "file:nasty-jvm-util"
-      },
-      "original": {
-        "type": "git",
-        "url": "file:nasty-jvm-util"
-      }
-    },
     "nixpkgs": {
-      "locked": {
-        "lastModified": 1730741070,
-        "narHash": "sha256-edm8WG19kWozJ/GqyYx2VjW99EdhjKwbY3ZwdlPAAlo=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "d063c1dd113c91ab27959ba540c0d9753409edf3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "NixOS",
-        "ref": "nixos-24.05",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
-    "nixpkgs-lib": {
-      "locked": {
-        "lastModified": 1717284937,
-        "narHash": "sha256-lIbdfCsf8LMFloheeE6N31+BMIeixqyQWbSr2vk79EQ=",
-        "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/eb9ceca17df2ea50a250b6b27f7bf6ab0186f198.tar.gz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://github.com/NixOS/nixpkgs/archive/eb9ceca17df2ea50a250b6b27f7bf6ab0186f198.tar.gz"
-      }
-    },
-    "nixpkgs_2": {
       "locked": {
         "lastModified": 1717696253,
         "narHash": "sha256-1+ua0ggXlYYPLTmMl3YeYYsBXDSCqT+Gw3u6l4gvMhA=",
@@ -98,9 +18,7 @@
     },
     "root": {
       "inputs": {
-        "build-gradle-application": "build-gradle-application",
-        "nasty-jvm-util": "nasty-jvm-util",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs"
       }
     }
   },

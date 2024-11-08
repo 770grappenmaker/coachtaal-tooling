@@ -1,6 +1,12 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-    id("kotlin")
+	kotlin("jvm")
     kotlin("plugin.serialization")
+}
+
+tasks.withType<KotlinCompile>().configureEach {
+    compilerOptions { freeCompilerArgs.add("-Xcontext-receivers") }
 }
 
 dependencies {

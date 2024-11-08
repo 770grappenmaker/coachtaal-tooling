@@ -11,7 +11,7 @@ object Project : CommandHolding() {
     override val name = "project"
     override val aliases = setOf("proj")
     override val subCommands = listOf(
-        FormatProject, TranslateProject, CompileProject, CleanProject, VisualizeProject, CSVProject, RunCompiledProject
+        FormatProject, TranslateProject, CleanProject, VisualizeProject, CSVProject
     )
 }
 
@@ -50,13 +50,6 @@ object TranslateProject : Command() {
     }
 }
 
-object CompileProject : Command() {
-    override val name = "compile"
-    override val aliases = setOf("c")
-
-    override fun invoke(args: List<String>) = cwd.loadProject().compile()
-}
-
 object VisualizeProject : Command() {
     override val name = "visualize"
     override val aliases = setOf("v")
@@ -90,7 +83,6 @@ object CSVProject : Command() {
                 iterScriptPath,
                 initScriptPath,
                 config.language.underlying,
-                config.compiled,
                 config.optimize
             )
         )
@@ -111,16 +103,4 @@ object CleanProject : Command() {
         buildDir.deleteChildrenRecursively()
         resultsDir.deleteChildrenRecursively()
     }
-}
-
-object RunCompiledProject : Command() {
-    override val name = "runcompiled"
-    override val aliases = setOf("rc")
-
-    private val runs by optionalInt(1)
-
-    override fun invoke(args: List<String>) = genericRunCompiled(
-        cwd.loadProject().cachedCompilation() ?: error("Cannot find appropriate build to run!"),
-        runs[args]
-    )
 }
