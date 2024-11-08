@@ -8,3 +8,6 @@ build
 .idea
 
 .kotlin
+
+# nix build result
+/result

@@ -1,5 +1,12 @@
 plugins {
 	kotlin("jvm")
+	application
+}
+
+application {
+    mainClass = "com.grappenmaker.coachtaal.lsp.CoachLanguageServerKt"
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8")
+    applicationName = "coach-lsp"
 }
 
 dependencies {

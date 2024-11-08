@@ -43,7 +43,7 @@
 			  runHook preBuild
 			  export GRADLE_USER_HOME=$TMP/gradle-home
 			  export NIX_MAVEN_REPO=${mavenRepo}
-			  gradle installDist -x test \
+			  gradle :app:installDist :lsp:installDist -x test \
 				  --offline --no-daemon \
 				  --warning-mode=all --parallel --console=plain \
 				  -PnixMavenRepo=${mavenRepo}
@@ -54,8 +54,13 @@
 				  runHook preInstall
 				  mkdir -p $out
 				  cp -r app/build/install/coach/* $out
+				  cp -r --no-clobber lsp/build/install/coach-lsp/* $out
+
 				  wrapProgram $out/bin/coach \
-				  --set "JAVA_HOME" "${pkgs.jre_minimal}"
+				  --set "JAVA_HOME" "${pkgs.jdk}"
+
+				  wrapProgram $out/bin/coach-lsp \
+				  --set "JAVA_HOME" "${pkgs.jdk}"
 
 				  runHook postInstall
 				  '';
