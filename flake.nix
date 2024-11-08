@@ -2,7 +2,7 @@
   description = "flake for Coachtaal compiler";
 
   inputs = {
-  nixpkgs.url = "github:NixOS/nixpkgs/9b5328b7f761a7bbdc0e332ac4cf076a3eedb89b";
+	  nixpkgs.url = "github:NixOS/nixpkgs/9b5328b7f761a7bbdc0e332ac4cf076a3eedb89b";
   };
 
   outputs = { self, nixpkgs, ... }:
@@ -17,18 +17,18 @@
     {
 	  packages = forEachSupportedSystem({ pkgs }: with pkgs; {
 		  default = (let
-  buildMavenRepo = callPackage ./maven-repo.nix { };
+			  buildMavenRepo = callPackage ./maven-repo.nix { };
 
-  mavenRepo = buildMavenRepo {
-    name = "nix-maven-repo";
-    repos = [
-      "https://repo1.maven.org/maven2"
-      "https://plugins.gradle.org/m2"
-      "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/dev"
-    ];
-    deps = builtins.fromJSON (builtins.readFile ./deps.json);
-  };
-in pkgs.stdenv.mkDerivation {
+			  mavenRepo = buildMavenRepo {
+				name = "nix-maven-repo";
+				repos = [
+				  "https://repo1.maven.org/maven2"
+				  "https://plugins.gradle.org/m2"
+				  "https://maven.pkg.jetbrains.space/kotlin/p/kotlin/dev"
+				];
+				deps = builtins.fromJSON (builtins.readFile ./deps.json);
+			  };
+		in pkgs.stdenv.mkDerivation {
 			  pname = "coach";
 			  version = "0.1";
 			  src = ./.;
@@ -37,30 +37,30 @@ in pkgs.stdenv.mkDerivation {
 			  gradle
 			  makeWrapper
 			  ];
-  JDK_HOME = "${jdk.home}";
+			  JDK_HOME = "${jdk.home}";
 
-  buildPhase = ''
-    runHook preBuild
-    export GRADLE_USER_HOME=$TMP/gradle-home
-    export NIX_MAVEN_REPO=${mavenRepo}
-    gradle installDist -x test \
-      --offline --no-daemon \
-      --warning-mode=all --parallel --console=plain \
-      -PnixMavenRepo=${mavenRepo}
-    runHook postBuild
-  '';
+			  buildPhase = ''
+			  runHook preBuild
+			  export GRADLE_USER_HOME=$TMP/gradle-home
+			  export NIX_MAVEN_REPO=${mavenRepo}
+			  gradle installDist -x test \
+				  --offline --no-daemon \
+				  --warning-mode=all --parallel --console=plain \
+				  -PnixMavenRepo=${mavenRepo}
+			  runHook postBuild
+				  '';
 
-  installPhase = ''
-    runHook preInstall
-    mkdir -p $out
-    cp -r app/build/install/coach/* $out
-    wrapProgram $out/bin/coach \
-    --set "JAVA_HOME" "${pkgs.jre_minimal}"
+			  installPhase = ''
+				  runHook preInstall
+				  mkdir -p $out
+				  cp -r app/build/install/coach/* $out
+				  wrapProgram $out/bin/coach \
+				  --set "JAVA_HOME" "${pkgs.jre_minimal}"
 
-    runHook postInstall
-  '';
+				  runHook postInstall
+				  '';
 
-  dontStrip = true;
+			  dontStrip = true;
 			  meta = {
 				  description = "Coachtaal compiler";
 			  };
