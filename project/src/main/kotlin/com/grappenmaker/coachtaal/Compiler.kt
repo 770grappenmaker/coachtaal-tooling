@@ -1,10 +1,11 @@
 package com.grappenmaker.coachtaal
 
-import com.grappenmaker.jvmutil.*
 import org.objectweb.asm.*
 import org.objectweb.asm.Opcodes.*
 import org.objectweb.asm.tree.*
 import kotlin.math.ceil
+
+inline fun <reified T : Any> internalNameOf() = T::class.java.name.replace('.', '/')
 
 inline fun buildInsnList(block: MethodVisitor.() -> Unit): InsnList {
     val target = InsnList()
@@ -93,6 +94,18 @@ inline fun <reified T : ModelRunner> addModelType(bytes: ByteArray): ByteArray {
     return writer.toByteArray()
 }
 
+inline fun ClassVisitor.generateMethod(
+    name: String,
+    desc: String,
+    access: Int = ACC_PUBLIC,
+    block: MethodVisitor.() -> Unit
+) = with(visitMethod(access, name, desc, null, null)) {
+    visitCode()
+    block()
+    visitMaxs(-1, -1)
+    visitEnd()
+}
+
 fun compileModel(
     compiledName: String,
     iter: ParsedProgram,
@@ -100,19 +113,21 @@ fun compileModel(
     language: Language = DutchLanguage,
     implements: List<String> = emptyList(),
     runnable: Boolean = false,
-) = generateClassBytes(
-    name = compiledName,
-    // or emptylist but extra allocation grr :upside_down:
-    implements = (if (runnable) implements else listOf(internalNameOf<ModelRunner>()) + implements).distinct(),
-    defaultConstructor = false
-) {
+): ByteArray = ClassWriter(ClassWriter.COMPUTE_FRAMES).apply {
+    val itf = buildSet {
+        add(internalNameOf<ModelRunner>())
+        if (!runnable) addAll(implements)
+    }.toTypedArray()
+
+    visit(V1_8, ACC_PUBLIC, compiledName, null, "java/lang/Object", itf)
+
     val variables = iter.extractVariables() + init.extractVariables()
     variables.forEach {
         visitField(ACC_PUBLIC, it.value, "F", null, null)
         generateMethod("get${it.value.replaceFirstChar { c -> c.uppercaseChar() }}", "()F") {
-            loadThis()
+            visitVarInsn(ALOAD, 0)
             visitFieldInsn(GETFIELD, compiledName, it.value, "F")
-            returnMethod(FRETURN)
+            visitInsn(FRETURN)
         }
     }
 
@@ -123,17 +138,17 @@ fun compileModel(
     with(CompilationContext(compiledName, language, variables, functionNames, terminableFunctions)) {
         allFunctions.forEach {
             generateMethod(it.name.value, "(${"F".repeat(it.parameters.size)})F") {
-                loadConstant(0.0f)
-                store(it.parameters.size + 1, FSTORE)
+                visitInsn(FCONST_0)
+                visitVarInsn(FSTORE, it.parameters.size + 1)
                 compile(it.body, it)
-                load(it.parameters.size + 1, FLOAD)
-                returnMethod(FRETURN)
+                visitVarInsn(FLOAD, it.parameters.size + 1)
+                visitInsn(FRETURN)
             }
         }
 
         generateMethod("memoryByName", "(Ljava/lang/String;)F") {
-            loadThis()
-            load(1)
+            visitVarInsn(ALOAD, 0)
+            visitVarInsn(ALOAD, 1)
             visitMethodInsn(INVOKEVIRTUAL, "java/lang/Object", "hashCode", "()I", false)
 
             val end = Label()
@@ -149,107 +164,148 @@ fun compileModel(
             }
 
             visitLabel(default)
-            pop()
-            loadConstant(0f)
+            visitInsn(POP)
+            visitInsn(FCONST_0)
             visitLabel(end)
-            returnMethod(FRETURN)
+            visitInsn(FRETURN)
         }
 
         visitField(ACC_PUBLIC, "_stopped", "Z", null, null)
         generateMethod("getStopped", "()Z") {
-            loadThis()
+            visitVarInsn(ALOAD, 0)
             visitFieldInsn(GETFIELD, compiledName, "_stopped", "Z")
-            returnMethod(IRETURN)
+            visitInsn(IRETURN)
         }
 
         val compiledInit = buildInsnList { compile(init.lines) }
 
         generateMethod("<init>", "()V") {
-            loadThis()
+            visitVarInsn(ALOAD, 0)
             visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
 
             compiledInit.accept(this)
-            returnMethod()
+            visitInsn(RETURN)
         }
 
         generateMethod("iteration", "()V") {
             val label = Label()
 
-            loadThis()
+            visitVarInsn(ALOAD, 0)
             visitFieldInsn(GETFIELD, compiledName, "_stopped", "Z")
             visitJumpInsn(IFNE, label)
 
             compile(iter.lines)
             visitLabel(label)
-            returnMethod()
+            visitInsn(RETURN)
         }
 
         generateMethod("reset", "()V") {
-            loadThis()
-            loadConstant(false)
+            visitVarInsn(ALOAD, 0)
+            visitInsn(ICONST_0)
             visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
 
             compiledInit.accept(this)
-            returnMethod()
+            visitInsn(RETURN)
         }
 
         generateMethod("main", "([Ljava/lang/String;)V", access = ACC_PUBLIC or ACC_STATIC) {
-            load(0)
-            loadConstant(0)
+            visitVarInsn(ALOAD, 0)
+            visitInsn(ICONST_0)
             visitInsn(AALOAD)
             visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "parseInt", "(Ljava/lang/String;)I", false)
-            dup()
-            store(4, ISTORE)
-            store(5, ISTORE)
+            visitInsn(DUP)
+            visitVarInsn(ISTORE, 4)
+            visitVarInsn(ISTORE, 5)
 
-            construct(compiledName, "()V")
-            store(1)
+            visitTypeInsn(NEW, compiledName)
+            visitInsn(DUP)
+            visitMethodInsn(INVOKESPECIAL, compiledName, "<init>", "()V", false)
+            visitVarInsn(ASTORE, 1)
 
             visitMethodInsn(INVOKESTATIC, "java/lang/System", "currentTimeMillis", "()J", false)
-            store(2, LSTORE)
+            visitVarInsn(LSTORE, 2)
 
             val repeat = Label().also { visitLabel(it) }
             visitIincInsn(4, -1)
-            load(1)
+            visitVarInsn(ALOAD, 1)
             visitMethodInsn(INVOKEVIRTUAL, compiledName, "reset", "()V", false)
 
             // <single iteration>
             val label = Label().also { visitLabel(it) }
             val end = Label()
 
-            load(1)
+            visitVarInsn(ALOAD, 1)
             visitFieldInsn(GETFIELD, compiledName, "_stopped", "Z")
             visitJumpInsn(IFNE, end)
 
-            load(1)
+            visitVarInsn(ALOAD, 1)
             visitMethodInsn(INVOKEVIRTUAL, compiledName, "iteration", "()V", false)
 
             visitJumpInsn(GOTO, label)
             visitLabel(end)
             // </single iteration>
 
-            load(4, ILOAD)
+            visitVarInsn(ILOAD, 4)
             visitJumpInsn(IFGT, repeat)
 
             visitMethodInsn(INVOKESTATIC, "java/lang/System", "currentTimeMillis", "()J", false)
-            load(2, LLOAD)
+            visitVarInsn(LLOAD, 2)
             visitInsn(LSUB)
-            store(2, LSTORE)
+            visitVarInsn(LSTORE, 2)
 
             visitFieldInsn(GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;")
-            concat {
-                appendString("Took ")
-                appendPrimitive(Type.LONG_TYPE) { load(2, LLOAD) }
-                appendString("ms for ")
-                appendPrimitive(Type.INT_TYPE) { load(5, ILOAD) }
-                appendString(" iterations.")
+
+            visitTypeInsn(NEW, "java/lang/StringBuilder")
+            visitInsn(DUP)
+            visitMethodInsn(INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+
+            fun appendString(cst: String) {
+                visitLdcInsn(cst)
+                visitMethodInsn(
+                    INVOKEVIRTUAL,
+                    "java/lang/StringBuilder",
+                    "append",
+                    "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                    false
+                )
             }
 
+            appendString("Took ")
+            visitVarInsn(LLOAD, 2)
+            visitMethodInsn(
+                INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(J)Ljava/lang/StringBuilder;",
+                false
+            )
+
+            appendString("ms for ")
+            visitVarInsn(ILOAD, 5)
+            visitMethodInsn(
+                INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(I)Ljava/lang/StringBuilder;",
+                false
+            )
+
+            appendString(" iterations.")
+            visitMethodInsn(
+                INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
+                false
+            )
+
             visitMethodInsn(INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V", false)
-            returnMethod()
+            visitInsn(RETURN)
         }
     }
-}
+
+    visitEnd()
+}.toByteArray()
 
 private fun Expr.remainingStackHeight(language: Language) = when (this) {
     is CallExpr -> if (name.value == language.stop) 0 else 1
@@ -259,10 +315,8 @@ private fun Expr.remainingStackHeight(language: Language) = when (this) {
     is RepeatingExpr, is WhileExpr, is FunctionExpr, is EOLExpr -> 0
 }
 
-private fun MethodVisitor.popRemaining(expr: Expr, language: Language) {
-    val pops = expr.remainingStackHeight(language)
-    if (pops > 0) pop(pops)
-}
+private fun MethodVisitor.popRemaining(expr: Expr, language: Language) =
+    repeat(expr.remainingStackHeight(language)) { visitInsn(POP) }
 
 context(CompilationContext)
 private fun MethodVisitor.compile(
@@ -276,19 +330,19 @@ private fun MethodVisitor.compile(
 
 fun MethodVisitor.returnFunctionSafe(function: FunctionExpr? = null) {
     if (function != null) {
-        load(function.parameters.size + 1, FLOAD)
-        returnMethod(FRETURN)
-    } else returnMethod()
+        visitVarInsn(FLOAD, function.parameters.size + 1)
+        visitInsn(FRETURN)
+    } else visitInsn(RETURN)
 }
 
 context(CompilationContext)
 private fun MethodVisitor.callFunction(id: Identifier, parameters: List<Expr>, function: FunctionExpr?) {
-    loadThis()
+    visitVarInsn(ALOAD, 0)
     compile(parameters, function, false)
     visitMethodInsn(INVOKEVIRTUAL, thisName, id.value, "(${"F".repeat(parameters.size)})F", false)
 
     if (id in terminableFunctions) {
-        loadThis()
+        visitVarInsn(ALOAD, 0)
         visitFieldInsn(GETFIELD, thisName, "_stopped", "Z")
         val label = Label()
         visitJumpInsn(IFEQ, label)
@@ -302,7 +356,7 @@ private fun MethodVisitor.reference(id: Identifier, function: FunctionExpr?) {
     if (function != null) {
         val idx = function.parameters.indexOf(id) + 1
         if (idx > 0) {
-            load(idx, FLOAD)
+            visitVarInsn(FLOAD, idx)
             return
         }
     }
@@ -312,12 +366,12 @@ private fun MethodVisitor.reference(id: Identifier, function: FunctionExpr?) {
         return
     }
 
-    loadThis()
+    visitVarInsn(ALOAD, 0)
     visitFieldInsn(GETFIELD, thisName, id.value, "F")
 }
 
 private inline fun MethodVisitor.update(id: Identifier, thisName: String, value: MethodVisitor.() -> Unit) {
-    loadThis()
+    visitVarInsn(ALOAD, 0)
     value()
     visitFieldInsn(PUTFIELD, thisName, id.value, "F")
 }
@@ -326,15 +380,15 @@ private fun MethodVisitor.convertBoolean(opcode: Int, compareWithZero: Boolean =
     val label = Label()
     val end = Label()
 
-    if (compareWithZero) loadConstant(0f)
+    if (compareWithZero) visitInsn(FCONST_0)
     visitInsn(FCMPG)
     visitJumpInsn(opcode, label)
 
-    loadConstant(0f)
+    visitInsn(FCONST_0)
     visitJumpInsn(GOTO, end)
 
     visitLabel(label)
-    loadConstant(255f)
+    visitLdcInsn(255f)
     visitLabel(end)
 }
 
@@ -345,7 +399,7 @@ fun MethodVisitor.compileConditionDefault(
     label: Label,
 ) {
     compile(condition, function)
-    loadConstant(0f)
+    visitInsn(FCONST_0)
     visitInsn(FCMPG)
     visitJumpInsn(IFLE, label)
 }
@@ -393,7 +447,7 @@ private fun MethodVisitor.compile(
         is AssignmentExpr -> {
             if (function?.name == expr.left) {
                 compile(expr.right, function)
-                store(function.parameters.size + 1, FSTORE)
+                visitVarInsn(FSTORE, function.parameters.size + 1)
                 return
             }
 
@@ -444,29 +498,36 @@ private fun MethodVisitor.compile(
                 !in language.allBuiltins -> error("Unresolved function call $name")
 
                 language.stop -> {
-                    loadThis()
-                    loadConstant(true)
+                    visitVarInsn(ALOAD, 0)
+                    visitInsn(ICONST_1)
                     visitFieldInsn(PUTFIELD, thisName, "_stopped", "Z")
                     returnFunctionSafe(function)
                 }
 
                 language.sqr -> {
-                    dup()
+                    visitInsn(DUP)
                     visitInsn(FMUL)
                 }
 
-                language.factorial -> invokeMethod(Float::roundFactorial)
+                language.factorial -> visitMethodInsn(
+                    INVOKESTATIC,
+                    "com/grappenmaker/coachtaal/UtilKt",
+                    "roundFactorial",
+                    "(F)F",
+                    false
+                )
+
                 language.step -> {
                     val label = Label()
                     val end = Label()
                     visitInsn(FCMPG)
                     visitJumpInsn(IFLT, label)
 
-                    loadConstant(1f)
+                    visitInsn(FCONST_1)
                     visitJumpInsn(GOTO, end)
 
                     visitLabel(label)
-                    loadConstant(0f)
+                    visitInsn(FCONST_0)
                     visitLabel(end)
                 }
 
@@ -518,13 +579,13 @@ private fun MethodVisitor.compile(
         }
 
         is IdentifierExpr -> when (expr.value.value.lowercase()) {
-            language.pi -> loadConstant(Math.PI.toFloat())
-            language.on -> loadConstant(255.0f)
-            language.off -> loadConstant(0.0f)
+            language.pi -> visitLdcInsn(Math.PI.toFloat())
+            language.on -> visitLdcInsn(255.0f)
+            language.off -> visitInsn(FCONST_0)
             else -> reference(expr.value, function)
         }
 
-        is LiteralExpr -> loadConstant(expr.value)
+        is LiteralExpr -> visitLdcInsn(expr.value) // potentially slightly inefficient, but who cares?
         is NotExpr -> convertBoolean(IFEQ)
         is UnaryMinusExpr -> {
             compile(expr.on, function)
@@ -555,18 +616,18 @@ private fun MethodVisitor.compile(
             val rep = expr.repetitions
             if (rep is LiteralExpr && rep.value <= 0.0f) return
 
-            loadConstant(0)
-            store(1, ISTORE)
+            visitInsn(ICONST_0)
+            visitVarInsn(ISTORE, 1)
 
             val start = Label().also { visitLabel(it) }
             compile(expr.body)
 
             visitIincInsn(1, 1)
-            load(1, ILOAD)
+            visitVarInsn(ILOAD, 1)
 
             when (rep) {
                 is LiteralExpr -> {
-                    loadConstant(ceil(rep.value).toInt())
+                    visitLdcInsn(ceil(rep.value).toInt())
                     visitJumpInsn(IF_ICMPLT, start)
                 }
 
