@@ -116,5 +116,5 @@ data class ProjectConfig(
 
 @Serializable
 enum class EnumLanguage(val underlying: Language) {
-    ENGLISH(EnglishLanguage), DUTCH(DutchLanguage)
+    ENGLISH(EnglishLanguage), DUTCH(DutchLanguage), SKIBIDI(SkibidiLanguage)
 }

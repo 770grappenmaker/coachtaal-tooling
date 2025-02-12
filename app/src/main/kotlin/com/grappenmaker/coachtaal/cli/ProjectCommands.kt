@@ -41,7 +41,7 @@ object TranslateProject : Command() {
         val toLang = to[args]
         fun translate(path: Path) {
             val parsed = parseProgram(path.readText(), from)
-            path.writeText(parsed.copy(language = toLang.underlying).asText(proj.formatter))
+            path.writeText(parsed.translate(toLang.underlying).asText(proj.formatter))
         }
 
         translate(proj.initScriptPath)

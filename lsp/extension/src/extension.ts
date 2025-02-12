@@ -16,8 +16,8 @@ export function activate(context: ExtensionContext) {
 	const jarPath = context.asAbsolutePath(join("build", "lsp.jar"));
 	const args = ["-jar", jarPath];
 	const serverOptions: ServerOptions = {
-		run: { transport: TransportKind.stdio, command: "java", args },
-		debug: { transport: TransportKind.stdio, command: "java", args }
+		run: { transport: TransportKind.stdio, command: "/home/koen/.sdkman/candidates/java/21.0.6-tem/bin/java", args },
+		debug: { transport: TransportKind.stdio, command: "/home/koen/.sdkman/candidates/java/21.0.6-tem/bin/java", args }
 	};
 
 	const clientOptions: LanguageClientOptions = {

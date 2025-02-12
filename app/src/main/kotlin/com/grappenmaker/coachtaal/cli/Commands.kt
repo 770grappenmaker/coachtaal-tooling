@@ -29,7 +29,7 @@ object Translate : Command() {
 
     override fun invoke(args: List<String>) {
         val parsed = parseProgram(Path(program[args]).readText(), from[args].underlying)
-        println(parsed.copy(language = to[args].underlying).asText())
+        println(parsed.translate(to[args].underlying).asText())
     }
 }
 

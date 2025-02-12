@@ -56,22 +56,37 @@ sealed interface Language {
     val endProcedure: String
 }
 
-val Language.allBuiltins get() = setOf(
-    abs, arcsin, arccos, arctan, sin, cos, tan, exp, ln, log, sqr, sqrt, floor,
-    round, factorial, max, min, random, sign, step, stop, on, off, pi
-)
+val Language.allBuiltins
+    get() = setOf(
+        abs, arcsin, arccos, arctan, sin, cos, tan, exp, ln, log, sqr, sqrt, floor,
+        round, factorial, max, min, random, sign, step, stop, on, off, pi
+    )
 
-val Language.builtinFunctions get() = setOf(
-    abs, arcsin, arccos, arctan, sin, cos, tan, exp, ln, log, sqr, sqrt, floor,
-    round, factorial, max, min, random, sign, step, stop
-)
+val Language.builtinFunctions
+    get() = setOf(
+        abs, arcsin, arccos, arctan, sin, cos, tan, exp, ln, log, sqr, sqrt, floor,
+        round, factorial, max, min, random, sign, step, stop
+    )
 
 val Language.builtinConstants get() = setOf(on, off, pi)
 
-val Language.keywords get() = setOf(
-    redoStatement, ifStatement, elseStatement, whileStatement, doWhileStatement,
-    endFunction, endDo, endProcedure, endRedo, endIfStatement, startDo, ifThen, startFunction, startProcedure
-)
+val Language.keywords
+    get() = setOf(
+        redoStatement,
+        ifStatement,
+        elseStatement,
+        whileStatement,
+        doWhileStatement,
+        endFunction,
+        endDo,
+        endProcedure,
+        endRedo,
+        endIfStatement,
+        startDo,
+        ifThen,
+        startFunction,
+        startProcedure
+    )
 
 // FIXME: hacky
 val Language.lookup get() = this::class.declaredMemberProperties.associate { it.name to it.call(this) as String }
@@ -185,8 +200,71 @@ data object EnglishLanguage : Language {
     override val endProcedure = "endprocedure"
 }
 
+data object SkibidiLanguage : Language by EnglishLanguage {
+    override val on = "real"
+    override val off = "unreal"
+    override val stop = "sus"
+    override val ifStatement = "skibidi"
+    override val ifThen = "toilet"
+    override val elseStatement = "ohio"
+    override val endIfStatement = "joever"
+    override val doWhileStatement = "copium"
+    override val doWhileUntil = "til"
+    override val whileStatement = "edge"
+    override val startDo = "rizz"
+    override val endDo = "joever"
+    override val redoStatement = "cooking"
+    override val endRedo = "joever"
+}
+
 fun Identifier.translate(from: Language, to: Language) =
     from.inverseLookup[value.lowercase()]?.let { to.lookup[it] }?.let(::Identifier) ?: this
+
+fun Expr.translate(from: Language, to: Language): Expr = when (this) {
+    is AssignmentExpr -> copy(right = right.translate(from, to))
+    is BinaryOperatorExpr -> copy(
+        left = left.translate(from, to),
+        right = right.translate(from, to)
+    )
+
+    is CallExpr -> copy(
+        name = name.translate(from, to),
+        arguments = arguments.map { it.translate(from, to) }
+    )
+
+    is ConditionalExpr -> copy(
+        condition = condition.translate(from, to),
+        whenTrue = whenTrue.map { it.translate(from, to) },
+        whenFalse = whenFalse?.map { it.translate(from, to) }
+    )
+
+    is FunctionExpr -> copy(body = body.map { it.translate(from, to) })
+    is IdentifierExpr -> copy(value = value.translate(from, to))
+    is NotExpr -> copy(on = on.translate(from, to))
+    is RepeatUntilExpr -> copy(
+        condition = condition.translate(from, to),
+        body = body.map { it.translate(from, to) }
+    )
+
+    is RepeatingExpr -> copy(
+        body = body.map { it.translate(from, to) },
+        repetitions = repetitions.translate(from, to)
+    )
+
+    is UnaryMinusExpr -> copy(on = on.translate(from, to))
+    is WhileExpr -> copy(
+        condition = condition.translate(from, to),
+        body = body.map { it.translate(from, to) }
+    )
+
+    else -> this
+}
+
+fun ParsedProgram.translate(language: Language) = copy(
+    lines = lines.map { it.translate(this.language, language) },
+    functions = functions.map { it.translate(this.language, language) as FunctionExpr },
+    language = language
+)
 
 fun Language.createConstants() = mapOf(
     on to 255f,
