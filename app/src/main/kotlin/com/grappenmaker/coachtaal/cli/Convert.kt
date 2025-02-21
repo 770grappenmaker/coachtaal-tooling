@@ -62,8 +62,6 @@ object Convert : Command() {
             val start = meta["start"]?.let(language::parseConstant) ?: return@let null
             val stop = meta["stop"]?.let(language::parseConstant) ?: return@let null
             val step = meta["step"]?.let(language::parseConstant) ?: return@let null
-            // step is only relevant for the automatic solvers, which do not exist
-            // in textual models, hence this is out of scope for this piece of trash software
             ((stop - start) / step).roundToInt()
         }
 
@@ -73,6 +71,12 @@ object Convert : Command() {
                 maxIterations = maxIters ?: -1
             )
         ).apply { init() }
+
+        if (cma.modelInit == null && cma.modelBody == null) {
+            println("Warning: this model appears to be a visual (non-textual) model")
+            println("Consider converting this model file to a textual model first")
+            println("This is currently not supported by this CLI")
+        }
 
         cma.modelInit?.let { newProject.initScriptPath.writeText(it) }
         cma.modelBody?.let { newProject.iterScriptPath.writeText(it) }

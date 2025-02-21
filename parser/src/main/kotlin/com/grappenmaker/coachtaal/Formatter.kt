@@ -2,6 +2,7 @@ package com.grappenmaker.coachtaal
 
 import kotlinx.serialization.Serializable
 import java.text.DecimalFormat
+import java.text.NumberFormat
 import java.text.ParseException
 import java.util.*
 
@@ -45,8 +46,11 @@ context(FormatterContext)
 private fun String.indent() = lines().joinToString(newLine) { indentString + it }
 
 val Language.locale: Locale get() = if (this is DutchLanguage) Locale.forLanguageTag("nl") else Locale.US
-val Language.decimalFormat get() =
-    DecimalFormat.getNumberInstance(locale).apply { maximumFractionDigits = 6 }
+val Language.decimalFormat: NumberFormat get() =
+    DecimalFormat.getNumberInstance(locale).apply {
+        maximumFractionDigits = 6
+        isGroupingUsed = false
+    }
 
 fun Language.formatConstant(cst: Float): String = decimalFormat.format(cst)
 fun Language.parseConstant(str: String): Float? = try {
