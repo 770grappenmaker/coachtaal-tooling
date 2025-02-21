@@ -11,7 +11,7 @@ object RootCommand : CommandHolding() {
     override val subCommands = listOf(
         Init, Project, Visualize, CSV, Format,
         Translate, Compile, RunCompiled, Parse, Tokenize,
-        ExerciseCommand
+        ExerciseCommand, Convert
     )
 
     override val name get() = error("The root command does not have a name!")
@@ -58,19 +58,32 @@ fun loadCliModel(
     initialPath: Path,
     language: Language,
     compile: Boolean,
-    optimize: Boolean = true
-) = loadCliModel(programPath.readText(), initialPath.readText(), language, compile, optimize)
+    optimize: Boolean = true,
+    maxIters: Int = -1
+) = loadCliModel(
+    programPath.readText(),
+    initialPath.readText(),
+    language,
+    compile,
+    optimize,
+    maxIters
+)
 
 fun loadCliModel(
     programCode: String,
     initialCode: String,
     language: Language,
     compile: Boolean,
-    optimize: Boolean = true
+    optimize: Boolean = true,
+    maxIterations: Int = -1
 ): CliModel {
     val program = parseProgram(programCode, language)
     val initial = parseProgram(initialCode, language)
-    val (popt, iopt) = if (optimize) program.optimizeWithInit(initial) else program to initial
+    val (popt, iopt) = if (optimize) {
+        program.optimizeWithInit(initial, requireTermination = maxIterations < 0)
+    } else {
+        program to initial
+    }
 
     return CliModel(
         program, initial, when {
@@ -78,10 +91,11 @@ fun loadCliModel(
                 compiledName = "$cliCompiledPrefix$cliModelCounter",
                 iter = popt,
                 init = iopt,
-                language = language
+                language = language,
+                maxIterations = maxIterations
             )
 
-            else -> Interpreter(popt, iopt, language)
+            else -> Interpreter(popt, iopt, language, maxIterations)
         }
     )
 }

@@ -55,7 +55,7 @@ class Interpreter(
     var iterations = 0
         private set
 
-    override var stopped = false
+    override var stopped = maxIterations == 0
     val memory = mutableMapOf<String, Float>()
 
     fun call(name: String, args: List<Float>): Float? {
@@ -72,7 +72,7 @@ class Interpreter(
         if (stopped) return
 
         iteration.lines.run()
-        if (++iterations >= maxIterations && maxIterations != -1) stopped = true
+        if (++iterations >= maxIterations && maxIterations > 0) stopped = true
     }
 
     private fun List<Expr>.run(scope: MutableMap<String, Float> = mutableMapOf()) {

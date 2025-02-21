@@ -91,7 +91,8 @@ object CSVProject : Command() {
                 initScriptPath,
                 config.language.underlying,
                 config.compiled,
-                config.optimize
+                config.optimize,
+                config.maxIterations
             )
         )
 

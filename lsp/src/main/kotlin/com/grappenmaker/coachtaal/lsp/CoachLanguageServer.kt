@@ -417,7 +417,7 @@ object CoachTextDocuments : TextDocumentService {
         val result = flatTokens.mapNotNull { (info, lexeme, line, column) ->
             val type = when (info) {
                 AssignmentToken, is BinaryOperatorToken, EqualsToken, NotToken -> SemanticTokenTypes.Operator
-                is Identifier -> when (info.value) {
+                is Identifier -> when (info.value.lowercase()) {
                     in lang.keywords -> SemanticTokenTypes.Keyword
                     in lang.builtinFunctions -> SemanticTokenTypes.Function
                     else -> SemanticTokenTypes.Variable

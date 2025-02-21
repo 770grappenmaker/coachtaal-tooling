@@ -56,10 +56,11 @@ inline fun <reified T : ModelRunner> createCompiledModel(
     compiledName: String,
     iter: ParsedProgram,
     init: ParsedProgram,
+    maxIterations: Int = -1,
     language: Language = DutchLanguage,
 ) = loadCompiledModel<T>(
     compiledName.replace('/', '.'),
-    compileModel(compiledName, iter, init, language, listOf(internalNameOf<T>()))
+    compileModel(compiledName, iter, init, language, maxIterations, listOf(internalNameOf<T>()))
 )
 
 inline fun <reified T : ModelRunner> loadCompiledModel(name: String, bytes: ByteArray): T {
@@ -111,6 +112,7 @@ fun compileModel(
     iter: ParsedProgram,
     init: ParsedProgram,
     language: Language = DutchLanguage,
+    maxIterations: Int = -1,
     implements: List<String> = emptyList(),
     runnable: Boolean = false,
 ): ByteArray = ClassWriter(ClassWriter.COMPUTE_FRAMES).apply {
@@ -130,6 +132,8 @@ fun compileModel(
             visitInsn(FRETURN)
         }
     }
+
+    if (maxIterations > 0) visitField(ACC_PUBLIC, "\$\$iters", "I", null, null)
 
     val allFunctions = iter.functions + init.functions
     val functionNames = allFunctions.mapTo(hashSetOf()) { it.name }
@@ -184,6 +188,13 @@ fun compileModel(
             visitMethodInsn(INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
 
             compiledInit.accept(this)
+
+            if (maxIterations == 0) {
+                visitVarInsn(ALOAD, 0)
+                visitInsn(ICONST_1)
+                visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
+            }
+
             visitInsn(RETURN)
         }
 
@@ -195,14 +206,34 @@ fun compileModel(
             visitJumpInsn(IFNE, label)
 
             compile(iter.lines)
+
+            if (maxIterations > 0) {
+                visitVarInsn(ALOAD, 0)
+                visitFieldInsn(GETFIELD, compiledName, "\$\$iters", "I")
+                visitInsn(ICONST_1)
+                visitInsn(IADD)
+                visitInsn(DUP)
+                visitVarInsn(ALOAD, 0)
+                visitInsn(SWAP)
+                visitFieldInsn(PUTFIELD, compiledName, "\$\$iters", "I")
+                visitLdcInsn(maxIterations)
+                visitJumpInsn(IF_ICMPLT, label)
+
+                visitVarInsn(ALOAD, 0)
+                visitInsn(ICONST_1)
+                visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
+            }
+
             visitLabel(label)
             visitInsn(RETURN)
         }
 
         generateMethod("reset", "()V") {
-            visitVarInsn(ALOAD, 0)
-            visitInsn(ICONST_0)
-            visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
+            if (maxIterations != 0) {
+                visitVarInsn(ALOAD, 0)
+                visitInsn(ICONST_0)
+                visitFieldInsn(PUTFIELD, compiledName, "_stopped", "Z")
+            }
 
             compiledInit.accept(this)
             visitInsn(RETURN)

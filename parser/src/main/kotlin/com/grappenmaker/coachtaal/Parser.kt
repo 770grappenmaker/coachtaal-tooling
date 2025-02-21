@@ -149,9 +149,13 @@ class Parser(
             val candidate = take(skipNewLine = false)
             val info = candidate.info
             if (info is Identifier) {
-                if (info.value == language.ifStatement) count++
-                if (info.value == language.endIfStatement) count--
-                if (count == 1 && info.value == language.elseStatement) seenElse = true
+                val id = info.value.lowercase()
+                if (id == language.ifStatement) count++
+                if (id == language.endIfStatement) count--
+                if (count == 1 && id == language.elseStatement) {
+                    seenElse = true
+                    continue
+                }
             }
 
             if (count == 0) return resA to resB
@@ -162,6 +166,7 @@ class Parser(
             if (seenElse) "expected ${language.endIfStatement} after ${language.elseStatement}"
             else "expected ${language.endIfStatement} or ${language.elseStatement} after ${language.ifStatement}"
         )
+
         error("Should be impossible???")
     }
 
@@ -325,6 +330,8 @@ class Parser(
                 idToken, "\"${language.onceInvalidStatement}\" is disabled, " +
                         "since it produces side effects that are not accessible from within the model."
             )
+
+            in language.keywords -> unexpected(idToken, "keyword in call position")
         }
 
         if (isAtEnd) return CallExpr(id, emptyList(), idToken)

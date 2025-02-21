@@ -83,13 +83,27 @@ fun genericCompile(
     className: String,
     relative: Path = cwd,
     optimize: Boolean = true,
+    maxIterations: Int = -1,
 ) {
-    val (popt, iopt) = if (optimize) program.optimizeWithInit(init) else program to init
+    // TODO: remove code duplication
+    val (popt, iopt) = if (optimize) {
+        program.optimizeWithInit(init, requireTermination = maxIterations < 0)
+    } else {
+        program to init
+    }
 
     val output = relative.resolve(className)
     output.createParentDirectories()
 
-    val bytes = compileModel(className.removeSuffix(".class"), popt, iopt, language, runnable = true)
+    val bytes = compileModel(
+        compiledName = className.removeSuffix(".class"),
+        iter = popt,
+        init = iopt,
+        language = language,
+        runnable = true,
+        maxIterations = maxIterations
+    )
+
     output.writeBytes(bytes)
 }
 

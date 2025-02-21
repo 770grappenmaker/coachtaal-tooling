@@ -111,10 +111,17 @@ data class ProjectConfig(
     val compiled: Boolean = true,
     val useCompilationCache: Boolean = true,
     val optimize: Boolean = true,
+    val maxIterations: Int = -1,
     // TODO
 )
 
 @Serializable
 enum class EnumLanguage(val underlying: Language) {
     ENGLISH(EnglishLanguage), DUTCH(DutchLanguage), SKIBIDI(SkibidiLanguage)
+}
+
+fun Language.toEnum() = when (this) {
+    DutchLanguage -> EnumLanguage.DUTCH
+    EnglishLanguage -> EnumLanguage.ENGLISH
+    SkibidiLanguage -> EnumLanguage.SKIBIDI
 }

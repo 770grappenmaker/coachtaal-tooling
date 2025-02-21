@@ -34,6 +34,7 @@ fun Project.compile() {
         parseProgram(initScriptPath.readText(), actualLanguage),
         output.name,
         output.parent,
-        config.optimize
+        config.optimize,
+        config.maxIterations
     )
 }

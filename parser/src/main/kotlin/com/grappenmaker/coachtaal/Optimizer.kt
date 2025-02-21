@@ -187,7 +187,10 @@ private fun Expr.analyzeVariables() {
     }
 }
 
-fun ParsedProgram.optimizeWithInit(init: ParsedProgram): Pair<ParsedProgram, ParsedProgram> {
+fun ParsedProgram.optimizeWithInit(
+    init: ParsedProgram,
+    requireTermination: Boolean = true
+): Pair<ParsedProgram, ParsedProgram> {
     require(language == init.language)
 
     val (initConstants, initAssignments) = init.analyzeVariables()
@@ -195,15 +198,16 @@ fun ParsedProgram.optimizeWithInit(init: ParsedProgram): Pair<ParsedProgram, Par
     val bothConstantIds = (initConstants.keys xor iterConstants.keys) - initAssignments
     val bothConstants = (initConstants + iterConstants).filterKeys { it in bothConstantIds }
 
-    return optimizeInternal(bothConstants).assertTermination() to init.optimizeInternal(initConstants)
+    val optimizedIter =
+        optimizeInternal(bothConstants).also { if (requireTermination) it.assertTermination() }
+
+    return optimizedIter to init.optimizeInternal(initConstants)
 }
 
-fun ParsedProgram.assertTermination(): ParsedProgram {
+fun ParsedProgram.assertTermination() {
     if (!couldTerminate()) error(
         "Static analysis showed that there is no possible way the iteration program could terminate!"
     )
-
-    return this
 }
 
 fun ParsedProgram.optimize() = optimizeInternal(analyzeVariables().constants)
