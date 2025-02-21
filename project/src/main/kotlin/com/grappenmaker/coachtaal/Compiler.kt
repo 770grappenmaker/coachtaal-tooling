@@ -124,11 +124,15 @@ fun compileModel(
     visit(V1_8, ACC_PUBLIC, compiledName, null, "java/lang/Object", itf)
 
     val variables = iter.extractVariables() + init.extractVariables()
-    variables.forEach {
-        visitField(ACC_PUBLIC, it.value, "F", null, null)
-        generateMethod("get${it.value.replaceFirstChar { c -> c.uppercaseChar() }}", "()F") {
+    val seenVars = hashSetOf<String>()
+    for (v in variables) {
+        visitField(ACC_PUBLIC, v.value, "F", null, null)
+        val name = "get${v.value.replaceFirstChar { c -> c.uppercaseChar() }}"
+        if (!seenVars.add(name)) continue // TODO: handle this better
+
+        generateMethod(name, "()F") {
             visitVarInsn(ALOAD, 0)
-            visitFieldInsn(GETFIELD, compiledName, it.value, "F")
+            visitFieldInsn(GETFIELD, compiledName, v.value, "F")
             visitInsn(FRETURN)
         }
     }

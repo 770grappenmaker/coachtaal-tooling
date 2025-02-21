@@ -61,9 +61,10 @@ object Convert : Command() {
         val maxIters = cma.metadata?.let { meta ->
             val start = meta["start"]?.let(language::parseConstant) ?: return@let null
             val stop = meta["stop"]?.let(language::parseConstant) ?: return@let null
+            val step = meta["step"]?.let(language::parseConstant) ?: return@let null
             // step is only relevant for the automatic solvers, which do not exist
             // in textual models, hence this is out of scope for this piece of trash software
-            (stop - start).roundToInt()
+            ((stop - start) / step).roundToInt()
         }
 
         val newProject = Project(
